@@ -9,6 +9,7 @@ import { ROOT, SOURCE, isDebug } from './config.js';
 import { settings, settingsPath } from './settings.js';
 import { pin } from './pin.js';
 import { wire } from './frontend.js';
+import { authServer } from './authServer.js';
 
 const { app, BrowserWindow } = electron;
 const { autoUpdater } = updater;
@@ -228,6 +229,12 @@ app.on ('ready', async () => {
     return;
   } else {
     logger.info ('Visual C++ Redistributable installed successfully or already installed');
+  }
+
+  try {
+    await authServer.start ();
+  } catch (error) {
+    logger.error ('Failed to start auth server:', error);
   }
 
   if (app.isPackaged) {

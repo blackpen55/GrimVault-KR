@@ -1,4 +1,4 @@
-import palette from "../web/src/palette.js";
+import palette from "./ui/palette.js";
 import colors from 'tailwindcss/colors';
 
 export default {

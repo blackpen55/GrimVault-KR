@@ -3,9 +3,9 @@ const { app } = electron;
 
 import { __dirname } from './config.js';
 import merge from 'deepmerge';
-import { parse } from 'ini';
+import { parse, stringify } from 'ini';
 import { logger } from './logger.js';
-import { existsSync, readFileSync, copyFileSync } from 'node:fs';
+import { existsSync, readFileSync, copyFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const settingsPath = join (app.getPath ('userData'), 'settings.ini');
@@ -83,4 +83,28 @@ function toList (s, values) {
   return s;
 }
 
-export { settings, settingsPath };
+function updateFromServer (serverSettings) {
+  if (!serverSettings) return;
+  
+  logger.info ('Updating settings from server:', serverSettings);
+  
+  // Merge server settings with local settings
+  if (serverSettings.general) {
+    Object.assign (settings.general, serverSettings.general);
+  }
+  
+  if (serverSettings.hotkeys) {
+    Object.assign (settings.hotkeys, serverSettings.hotkeys);
+  }
+  
+  // Save updated settings to file
+  try {
+    const settingsString = stringify (settings);
+    writeFileSync (settingsPath, settingsString);
+    logger.info ('Settings updated and saved to disk');
+  } catch (error) {
+    logger.error ('Failed to save updated settings:', error);
+  }
+}
+
+export { settings, settingsPath, updateFromServer };

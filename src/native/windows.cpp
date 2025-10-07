@@ -1,6 +1,9 @@
 #include "logger.h"
 #include "windows.h"
 #include <shellscalingapi.h>
+#include <combaseapi.h>
+#include <memory>
+#include <functional>
 
 // To get DPI scaling
 #pragma comment(lib, "shcore.lib")
@@ -12,6 +15,20 @@ ActiveWindowWorker::ActiveWindowWorker (const Napi::Env& env) : Napi::AsyncWorke
 
 void ActiveWindowWorker::Execute ()
 {
+   // Initialize COM for this thread to safely access COM objects
+   HRESULT comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+   bool comInitialized = SUCCEEDED(comResult);
+
+   // Ensure COM cleanup on exit
+   auto comCleanup = std::unique_ptr<void, std::function<void(void*)>>(
+      &comResult,
+      [comInitialized](void*) {
+         if (comInitialized) {
+            CoUninitialize();
+         }
+      }
+   );
+
    HWND handle = GetForegroundWindow ();
    
    if (!handle) {

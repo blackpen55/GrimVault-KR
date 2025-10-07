@@ -18,7 +18,15 @@ const api = axios.create ({
   withCredentials: 'include'
 });
 
-api.interceptors.request.use ((request) => {
+api.interceptors.request.use (async (request) => {
+  // Lazy load authServer to avoid circular dependency
+  const { authServer } = await import ('./authServer.js');
+  const apiKey = await authServer.getApiKey ();
+  
+  if (apiKey) {
+    request.headers ['X-API-Key'] = apiKey;
+  }
+  
   logger.info (`${request.method.toUpperCase ()} ${getUrl (request)}`);
   return request;
 });

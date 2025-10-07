@@ -3,6 +3,7 @@ import { logger } from './logger.js';
 import { settings } from './settings.js';
 import { getTooltip } from './native.js';
 import { api } from './api.js';
+import { authServer } from './authServer.js';
 
 const frontend = electron.ipcMain;
 
@@ -56,6 +57,16 @@ export function wire (overlay) {
     }
 
     send ('scan:finish');
+  });
+  
+  frontend.handle ('auth:status', async () => {
+    const hasCredentials = await authServer.hasCredentials ();
+    return { linked: hasCredentials };
+  });
+  
+  frontend.handle ('auth:logout', async () => {
+    await authServer.clearCredentials ();
+    return { success: true };
   });
 }
 
