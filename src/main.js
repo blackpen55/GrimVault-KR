@@ -7,9 +7,10 @@ import { logSystemInformation } from './util.js';
 import { checkAndInstallVCRedist } from './vcredist.js';
 import { ROOT, SOURCE, isDebug } from './config.js';
 import { settings, settingsPath } from './settings.js';
-import { pin } from './pin.js';
+import { pin, handleWindowEvent, setOverlayReference } from './pin.js';
 import { wire } from './frontend.js';
 import { authServer } from './authServer.js';
+import { startWindowHooks, stopWindowHooks } from './native.js';
 
 const { app, BrowserWindow } = electron;
 const { autoUpdater } = updater;
@@ -90,6 +91,13 @@ app.on ('child-process-gone', (event, details) => {
 app.on ('before-quit', () => {
   logger.info ('App preparing to quit, cleaning up resources');
   globalShortcut.unregisterAll ();
+
+  try {
+    stopWindowHooks ();
+    logger.info ('Window event hooks stopped');
+  } catch (error) {
+    logger.error ('Error stopping window event hooks:', error);
+  }
 });
 
 app.on ('ready', async () => {
@@ -202,11 +210,31 @@ app.on ('ready', async () => {
 
   overlay.webContents.setZoomFactor (1);
 
-  logger.info ('Registering overlay pin');
+  logger.info ('Initializing event-driven overlay positioning');
 
+  // Set overlay reference for event handling
+  setOverlayReference (overlay, debugging);
+
+  // Start Windows event hooks for real-time window tracking
+  try {
+    const success = startWindowHooks ((eventData) => {
+      handleWindowEvent (eventData);
+    });
+
+    if (success) {
+      logger.info ('Window event hooks started successfully');
+    } else {
+      logger.error ('Failed to start window event hooks');
+    }
+  } catch (error) {
+    logger.error ('Error starting window event hooks:', error);
+  }
+
+  // Fallback polling mechanism (much slower, only for safety)
+  logger.info ('Starting fallback polling mechanism');
   setInterval (() => {
     pin (overlay, debugging);
-  }, 2500);
+  }, 30000); // 30 seconds instead of 2.5 seconds
 
   wire (overlay);
 

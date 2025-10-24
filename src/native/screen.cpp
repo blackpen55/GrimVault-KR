@@ -132,7 +132,7 @@ bool Screen::Initialize ()
          return TRUE;
       }, reinterpret_cast<LPARAM> (&HasHDR));
 
-      if (HasHDR) {
+      if (1 || HasHDR) {
          Logger::log (
             Logger::Level::E_INFO,
             "Found at least 1 monitor running HDR, using Windows Graphic Capture"
@@ -245,28 +245,34 @@ std::optional<cv::Mat> Screen::Capture ()
    std::lock_guard<std::mutex> Lock (CaptureLock);
    
    if (CurrentCaptureMethod == CaptureMethod::WindowsGraphicsCapture && WGCInstance) {
-      HWND GameWindow = FindGameWindow ();
+      // For WGC/HDR, capture the entire monitor, not just the window
+      std::optional<HMONITOR> GameMonitor = GetGameMonitor ();
 
-      if (!GameWindow) {
+      if (!GameMonitor) {
          Logger::log (
              Logger::Level::E_DEBUG,
-             "Failed to find game window for capture"
+             "Failed to find game monitor for WGC capture"
          );
 
          return std::nullopt;
       }
 
-      std::optional<cv::Mat> frame = WGCInstance->CaptureWindow (GameWindow);
-      
+      std::optional<cv::Mat> frame = WGCInstance->CaptureMonitor (GameMonitor.value ());
+
       if (!frame) {
          Logger::log (
             Logger::Level::E_WARNING,
-            "Windows Graphics Capture failed to capture frame"
+            "Windows Graphics Capture failed to capture monitor frame"
          );
-        
+
          return std::nullopt;
       }
-      
+
+      Logger::log (
+         Logger::Level::E_DEBUG,
+         "Successfully captured monitor frame via WGC"
+      );
+
       return frame;
    }
    

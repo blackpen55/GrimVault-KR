@@ -161,7 +161,7 @@ writeFileSync (
 );
 
 try {
-  const command = DEBUG ? "NODE_ENV=development node-gyp rebuild --verbose" : "node-gyp rebuild --verbose";
+  const command = DEBUG ? "NODE_ENV=development npx node-gyp rebuild --verbose" : "npx node-gyp rebuild --verbose";
   execSync (command, { stdio: "inherit" });
 } catch (error) {
   console.error ("Build failed: ", error);

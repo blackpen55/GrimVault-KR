@@ -235,26 +235,56 @@ std::optional<cv::Mat> WindowsGraphicsCapture::CaptureWindow (HWND GameWindow)
     if (!IsInitialized || !GameWindow) {
         return std::nullopt;
     }
-    
+
     std::lock_guard<std::mutex> Lock (CaptureLock);
-    
+
     try {
+        // Validate window before attempting capture
+        if (!IsWindow (GameWindow)) {
+            Logger::log (
+                Logger::Level::E_WARNING,
+                "Invalid window handle provided to CaptureWindow"
+            );
+            return std::nullopt;
+        }
+
+        if (!IsWindowVisible (GameWindow)) {
+            Logger::log (
+                Logger::Level::E_WARNING,
+                "Window is not visible, cannot capture"
+            );
+            return std::nullopt;
+        }
+
         auto InteropFactory = winrt::get_activation_factory<
             winrt::GraphicsCaptureItem
         >().as<IGraphicsCaptureItemInterop> ();
-        
+
         bool NeedsNewSession = false;
-        
+
         if (!CaptureItem) {
             NeedsNewSession = true;
-            
+
             winrt::GraphicsCaptureItem Item { nullptr };
-            winrt::check_hresult (InteropFactory->CreateForWindow (
+            HRESULT hr = InteropFactory->CreateForWindow (
                 GameWindow,
                 winrt::guid_of<winrt::GraphicsCaptureItem> (),
                 winrt::put_abi (Item)
-            ));
-            
+            );
+
+            if (FAILED (hr)) {
+                Logger::log (
+                    Logger::Level::E_ERROR,
+                    "CreateForWindow failed with HRESULT: 0x" +
+                    std::to_string (hr) + " - " +
+                    (hr == E_ACCESSDENIED ? "Access Denied" :
+                     hr == E_INVALIDARG ? "Invalid Argument" : "Unknown Error")
+                );
+                return std::nullopt;
+            }
+
+            winrt::check_hresult (hr);
+
             if (!Item) {
                 Logger::log (
                     Logger::Level::E_WARNING,
@@ -262,7 +292,7 @@ std::optional<cv::Mat> WindowsGraphicsCapture::CaptureWindow (HWND GameWindow)
                 );
                 return std::nullopt;
             }
-            
+
             CaptureItem = Item;
         }
         
@@ -424,6 +454,242 @@ std::optional<cv::Mat> WindowsGraphicsCapture::CaptureWindow (HWND GameWindow)
         Logger::log (
             Logger::Level::E_ERROR,
             "Unknown exception in Graphics Capture"
+        );
+        return std::nullopt;
+    }
+}
+
+std::optional<cv::Mat> WindowsGraphicsCapture::CaptureMonitor (HMONITOR Monitor)
+{
+    if (!IsInitialized || !Monitor) {
+        Logger::log (
+            Logger::Level::E_WARNING,
+            "CaptureMonitor called with invalid state or monitor handle"
+        );
+        return std::nullopt;
+    }
+
+    std::lock_guard<std::mutex> Lock (CaptureLock);
+
+    try {
+        auto InteropFactory = winrt::get_activation_factory<
+            winrt::GraphicsCaptureItem
+        >().as<IGraphicsCaptureItemInterop> ();
+
+        bool NeedsNewSession = false;
+
+        if (!CaptureItem) {
+            NeedsNewSession = true;
+
+            Logger::log (
+                Logger::Level::E_INFO,
+                "Creating Graphics Capture Item for monitor"
+            );
+
+            winrt::GraphicsCaptureItem Item { nullptr };
+            HRESULT hr = InteropFactory->CreateForMonitor (
+                Monitor,
+                winrt::guid_of<winrt::GraphicsCaptureItem> (),
+                winrt::put_abi (Item)
+            );
+
+            if (FAILED (hr)) {
+                Logger::log (
+                    Logger::Level::E_ERROR,
+                    "CreateForMonitor failed with HRESULT: 0x" +
+                    std::to_string (hr) + " - " +
+                    (hr == E_ACCESSDENIED ? "Access Denied" :
+                     hr == E_INVALIDARG ? "Invalid Argument" : "Unknown Error")
+                );
+                return std::nullopt;
+            }
+
+            if (!Item) {
+                Logger::log (
+                    Logger::Level::E_WARNING,
+                    "Failed to create capture item for monitor"
+                );
+                return std::nullopt;
+            }
+
+            CaptureItem = Item;
+
+            Logger::log (
+                Logger::Level::E_INFO,
+                "Successfully created Graphics Capture Item for monitor"
+            );
+        }
+
+        if (NeedsNewSession || !FramePool || !CaptureSession) {
+            if (CaptureSession) {
+                CaptureSession.Close ();
+                CaptureSession = nullptr;
+            }
+
+            if (FramePool) {
+                FramePool.Close ();
+                FramePool = nullptr;
+            }
+
+            auto Size = CaptureItem.Size ();
+
+            Logger::log (
+                Logger::Level::E_INFO,
+                "Creating frame pool for monitor capture: " +
+                std::to_string (Size.Width) + "x" + std::to_string (Size.Height)
+            );
+
+            FramePool = winrt::Direct3D11CaptureFramePool::Create (
+                WinRTDevice,
+                winrt::DirectXPixelFormat::B8G8R8A8UIntNormalized,
+                1,
+                Size
+            );
+
+            CaptureSession = FramePool.CreateCaptureSession (CaptureItem);
+            CaptureSession.StartCapture ();
+
+            Logger::log (
+                Logger::Level::E_INFO,
+                "Capture session started for monitor"
+            );
+
+            std::this_thread::sleep_for (std::chrono::milliseconds (50));
+        }
+
+        // Discard stale frames
+        for (int i = 0; i < 3; i++) {
+            auto DiscardFrame = FramePool.TryGetNextFrame ();
+            if (DiscardFrame) {
+                DiscardFrame.Close ();
+            }
+            std::this_thread::sleep_for (std::chrono::milliseconds (25));
+        }
+
+        auto Frame = FramePool.TryGetNextFrame ();
+
+        if (!Frame) {
+            Logger::log (
+                Logger::Level::E_WARNING,
+                "Failed to get capture frame from monitor"
+            );
+            return std::nullopt;
+        }
+
+        auto Surface = Frame.Surface ();
+        auto Access = Surface.as<IDirect3DDxgiInterfaceAccess>();
+
+        winrt::com_ptr<ID3D11Texture2D> Texture;
+        winrt::check_hresult (Access->GetInterface (IID_PPV_ARGS (&Texture)));
+
+        D3D11_TEXTURE2D_DESC Desc;
+        Texture->GetDesc (&Desc);
+
+        D3D11_TEXTURE2D_DESC StagingDesc = Desc;
+        StagingDesc.Usage = D3D11_USAGE_STAGING;
+        StagingDesc.BindFlags = 0;
+        StagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        StagingDesc.MiscFlags = 0;
+
+        winrt::com_ptr<ID3D11Texture2D> StagingTexture;
+        HRESULT hr = Device->CreateTexture2D (&StagingDesc, nullptr, StagingTexture.put ());
+
+        if (FAILED (hr)) {
+            Logger::log (hr, "Failed to create staging texture for monitor capture");
+            Surface.Close ();
+            Frame.Close ();
+            return std::nullopt;
+        }
+
+        Context->CopyResource (StagingTexture.get (), Texture.get ());
+
+        D3D11_MAPPED_SUBRESOURCE MappedResource;
+        hr = Context->Map (
+            StagingTexture.get (),
+            0,
+            D3D11_MAP_READ,
+            0,
+            &MappedResource
+        );
+
+        if (FAILED (hr)) {
+            Logger::log (hr, "Failed to map texture for monitor capture");
+            Surface.Close ();
+            Frame.Close ();
+            return std::nullopt;
+        }
+
+        // Ensure texture is unmapped in all paths - use safe RAII guard
+        struct UnmapGuard {
+            Microsoft::WRL::ComPtr<ID3D11DeviceContext> ctx;
+            winrt::com_ptr<ID3D11Texture2D> texture;
+            bool shouldUnmap;
+
+            UnmapGuard (Microsoft::WRL::ComPtr<ID3D11DeviceContext> c, winrt::com_ptr<ID3D11Texture2D> t)
+                : ctx (c), texture (t), shouldUnmap (true) {}
+
+            ~UnmapGuard () {
+                if (shouldUnmap && ctx && texture) {
+                    try {
+                        ctx->Unmap (texture.get (), 0);
+                    } catch (...) {
+                    }
+                }
+            }
+
+            void release () { shouldUnmap = false; }
+        };
+
+        UnmapGuard unmapGuard (Context, StagingTexture);
+
+        cv::Mat Screenshot (
+            Desc.Height,
+            Desc.Width,
+            CV_8UC4,
+            MappedResource.pData,
+            MappedResource.RowPitch
+        );
+
+        cv::Mat Result = Screenshot.clone ();
+
+        // Unmap is handled automatically by RAII guard
+
+        Surface.Close ();
+        Frame.Close ();
+
+        return Result;
+    } catch (const winrt::hresult_error& e) {
+        Logger::log (
+            Logger::Level::E_ERROR,
+            "WinRT error in Monitor Graphics Capture: " +
+            winrt::to_string (e.message ()) +
+            " (HRESULT: 0x" + std::to_string (e.code ()) + ")"
+        );
+
+        // Reset capture state on error
+        if (CaptureSession) {
+            CaptureSession.Close ();
+            CaptureSession = nullptr;
+        }
+
+        if (FramePool) {
+            FramePool.Close ();
+            FramePool = nullptr;
+        }
+
+        CaptureItem = nullptr;
+
+        return std::nullopt;
+    } catch (const std::exception& e) {
+        Logger::log (
+            Logger::Level::E_ERROR,
+            std::string ("Exception in Monitor Graphics Capture: ") + e.what ()
+        );
+        return std::nullopt;
+    } catch (...) {
+        Logger::log (
+            Logger::Level::E_ERROR,
+            "Unknown exception in Monitor Graphics Capture"
         );
         return std::nullopt;
     }

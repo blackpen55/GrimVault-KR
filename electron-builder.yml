@@ -20,6 +20,7 @@ win:
   icon: assets/images/Icon-324x356.png
   target:
     - nsis
+  requestedExecutionLevel: requireAdministrator
   extraFiles:
     - from: src/native/.build/
       to: resources/dlls/

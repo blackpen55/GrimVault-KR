@@ -9,4 +9,5 @@
 
 HWND FindGameWindow ();
 std::optional<int> GetGameMonitorId ();
+std::optional<HMONITOR> GetGameMonitor ();
 bool IsMonitorHDR (HMONITOR Monitor);

@@ -85,35 +85,56 @@ HWND FindGameWindow ()
    return Params.Result;
 }
 
+std::optional<HMONITOR> GetGameMonitor ()
+{
+   HWND GameWindow = FindGameWindow ();
+
+   if (!GameWindow) {
+      return std::nullopt;
+   }
+
+   HMONITOR Monitor = MonitorFromWindow (GameWindow, MONITOR_DEFAULTTONEAREST);
+
+   if (!Monitor) {
+      Logger::log (
+         Logger::Level::E_WARNING,
+         "Failed to get monitor handle from game window"
+      );
+      return std::nullopt;
+   }
+
+   return Monitor;
+}
+
 std::optional<int> GetGameMonitorId ()
 {
    auto Now = std::chrono::steady_clock::now ();
    auto TimeSinceLastCheck = std::chrono::duration_cast<std::chrono::milliseconds> (Now - LastMonitorCheck).count ();
-   
+
    // Only check for game window every 10000ms (1 second) to avoid performance impact
    if (TimeSinceLastCheck < 10000) {
       std::lock_guard<std::mutex> Lock (GameMonitorMutex);
       return GameMonitorId;
    }
-   
+
    LastMonitorCheck = Now;
-   
+
    HWND GameWindow = FindGameWindow ();
-   
+
    if (!GameWindow) {
       std::lock_guard<std::mutex> Lock (GameMonitorMutex);
       GameMonitorId = std::nullopt;
       return std::nullopt;
    }
-   
+
    HMONITOR Monitor = MonitorFromWindow (GameWindow, MONITOR_DEFAULTTONEAREST);
-   
+
    if (!Monitor) {
       std::lock_guard<std::mutex> Lock (GameMonitorMutex);
       GameMonitorId = std::nullopt;
       return std::nullopt;
    }
-   
+
    MONITORINFOEX MonitorInfo = {0};
    MonitorInfo.cbSize = sizeof(MONITORINFOEX);
 
@@ -122,40 +143,40 @@ std::optional<int> GetGameMonitorId ()
       GameMonitorId = std::nullopt;
       return std::nullopt;
    }
-   
+
    auto Monitors = SL::Screen_Capture::GetMonitors ();
-   
+
    for (const auto& M : Monitors) {
       RECT MonitorRect = MonitorInfo.rcMonitor;
-      
+
       int PhysicalWidth = MonitorRect.right - MonitorRect.left;
       int PhysicalHeight = MonitorRect.bottom - MonitorRect.top;
-      
-      bool IsMatch = (M.OffsetX == MonitorRect.left && 
-                      M.OffsetY == MonitorRect.top && 
+
+      bool IsMatch = (M.OffsetX == MonitorRect.left &&
+                      M.OffsetY == MonitorRect.top &&
                        (
                         (M.Width == PhysicalWidth && M.Height == PhysicalHeight) ||
                         (M.OriginalWidth == PhysicalWidth && M.OriginalHeight == PhysicalHeight)
                        ));
-      
+
       if (IsMatch) {
          std::lock_guard<std::mutex> Lock (GameMonitorMutex);
          GameMonitorId = M.Id;
-         
+
          Logger::log (
             Logger::Level::E_INFO,
-            "Found game window on monitor " + std::to_string (M.Id) + 
-            " (" + std::to_string (M.Width) + "x" + std::to_string (M.Height) + 
-            ", Original: " + std::to_string (M.OriginalWidth) + "x" + std::to_string (M.OriginalHeight) + 
-            ", Physical: " + std::to_string (PhysicalWidth) + "x" + std::to_string (PhysicalHeight) + 
-            ") at (" + std::to_string (M.OffsetX) + "," + std::to_string (M.OffsetY) + 
+            "Found game window on monitor " + std::to_string (M.Id) +
+            " (" + std::to_string (M.Width) + "x" + std::to_string (M.Height) +
+            ", Original: " + std::to_string (M.OriginalWidth) + "x" + std::to_string (M.OriginalHeight) +
+            ", Physical: " + std::to_string (PhysicalWidth) + "x" + std::to_string (PhysicalHeight) +
+            ") at (" + std::to_string (M.OffsetX) + "," + std::to_string (M.OffsetY) +
             "), Scaling: " + std::to_string (M.Scaling)
          );
-         
+
          return M.Id;
       }
    }
-   
+
    std::lock_guard<std::mutex> Lock (GameMonitorMutex);
    GameMonitorId = std::nullopt;
    return std::nullopt;

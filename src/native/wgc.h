@@ -33,6 +33,7 @@ public:
     bool Initialize ();
     void Cleanup ();
     std::optional<cv::Mat> CaptureWindow (HWND GameWindow);
+    std::optional<cv::Mat> CaptureMonitor (HMONITOR Monitor);
     
 private:
     std::mutex CaptureLock;

@@ -110,10 +110,10 @@ Napi::Value FetchGameWindow (const Napi::CallbackInfo& Info)
    return Worker->GetPromise ();
 }
 
-Napi::Value Cleanup (const Napi::CallbackInfo& Info) 
+Napi::Value Cleanup (const Napi::CallbackInfo& Info)
 {
    Napi::Env Env = Info.Env ();
-   
+
    try {
       std::lock_guard<std::mutex> lock(GlobalScreenMutex);
       if (GlobalScreen) {
@@ -126,14 +126,43 @@ Napi::Value Cleanup (const Napi::CallbackInfo& Info)
    }
 }
 
-Napi::Object Init (Napi::Env Env, Napi::Object Exports) 
+Napi::Value StartWindowHooks (const Napi::CallbackInfo& Info)
+{
+   Napi::Env Env = Info.Env ();
+
+   if (Info.Length () < 1 || !Info [0].IsFunction ()) {
+      Napi::TypeError::New (Env, "Expected a callback function").ThrowAsJavaScriptException ();
+      return Env.Undefined ();
+   }
+
+   Napi::Function callback = Info [0].As<Napi::Function> ();
+
+   WindowEventHook& hook = WindowEventHook::GetInstance ();
+   bool success = hook.Initialize (Env, callback);
+
+   return Napi::Boolean::New (Env, success);
+}
+
+Napi::Value StopWindowHooks (const Napi::CallbackInfo& Info)
+{
+   Napi::Env Env = Info.Env ();
+
+   WindowEventHook& hook = WindowEventHook::GetInstance ();
+   hook.Shutdown ();
+
+   return Env.Undefined ();
+}
+
+Napi::Object Init (Napi::Env Env, Napi::Object Exports)
 {
    Exports.Set ("initialize", Napi::Function::New (Env, Initialize));
    Exports.Set ("getTooltip", Napi::Function::New (Env, GetTooltip));
    Exports.Set ("getActiveWindow", Napi::Function::New (Env, FetchActiveWindow));
    Exports.Set ("getGameWindow", Napi::Function::New (Env, FetchGameWindow));
    Exports.Set ("cleanup", Napi::Function::New (Env, Cleanup));
-   
+   Exports.Set ("startWindowHooks", Napi::Function::New (Env, StartWindowHooks));
+   Exports.Set ("stopWindowHooks", Napi::Function::New (Env, StopWindowHooks));
+
    return Exports;
 }
 

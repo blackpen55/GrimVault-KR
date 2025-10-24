@@ -32,7 +32,7 @@ if (app.isPackaged) {
   onnxModelPath = join (ROOT, '..', 'models', 'tooltip.onnx');  
 } else {
   tesseractModelPath = join (ROOT, 'models', 'tesseract');
-  onnxModelPath = join (ROOT, 'models', 'vision', 'runs', 'detect', 'train', 'weights', 'best.onnx');
+  onnxModelPath = join (ROOT, 'models', 'tooltip.onnx');
 }
 
 let onMessageCallback = (level, message) => {
@@ -55,11 +55,15 @@ if (!success) {
 let {
   getTooltip,
   getActiveWindow,
-  getGameWindow
+  getGameWindow,
+  startWindowHooks,
+  stopWindowHooks
 } = native;
 
 export {
   getTooltip,
   getActiveWindow,
-  getGameWindow
+  getGameWindow,
+  startWindowHooks,
+  stopWindowHooks
 };
