@@ -204,7 +204,8 @@ app.on ('ready', async () => {
     type: 'toolbar',
     webPreferences: {
       preload: join (SOURCE, 'preload.cjs'),
-      sandbox: false
+      sandbox: false,
+      backgroundThrottling: true // Allow Electron to throttle rendering when hidden
     },
   });
 

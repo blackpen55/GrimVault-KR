@@ -9,12 +9,16 @@
 #include <thread>
 #include <windows.h>
 #include <wrl/client.h>
+#include <filesystem>
 
 #define SC_LITE_STATIC
 #include <ScreenCapture.h>
 
 std::string Screen::TesseractPath = "";
 std::string Screen::OnnxFile = "";
+bool Screen::DebugMode = false;
+std::string Screen::DebugPath = "";
+std::atomic<int> Screen::DebugCounter(0);
 
 Screen::~Screen () 
 {
@@ -25,24 +29,61 @@ Screen::Screen () : IsInitialized (false), MainThreadId (std::this_thread::get_i
 {
 }
 
-bool Screen::Initialize () 
+bool Screen::Initialize (const std::string& debugPath)
 {
    if (TesseractPath.empty () || OnnxFile.empty ()) {
       Logger::log (
          Logger::Level::E_ERROR,
          "Paths not set: TesseractPath and OnnxFile must be set before screen initialization"
       );
-      
+
       return false;
    }
 
-   Cleanup ();   
+   Cleanup ();
 
    Logger::log (
-      Logger::Level::E_INFO, 
+      Logger::Level::E_INFO,
       "Initializing screen"
    );
-   
+
+   // Setup debug mode
+   const char* debugEnv = std::getenv ("GRIMVAULT_DEBUG_IMAGES");
+   DebugMode = (debugEnv != nullptr && std::string(debugEnv) == "1");
+
+   if (DebugMode) {
+      if (!debugPath.empty ()) {
+         DebugPath = debugPath;
+      } else {
+         Logger::log (
+            Logger::Level::E_WARNING,
+            "Debug mode enabled but no debug path provided, disabling debug output"
+         );
+         DebugMode = false;
+      }
+
+      if (DebugMode) {
+         // Create debug folder
+         try {
+            std::filesystem::create_directories (DebugPath);
+
+            Logger::log (
+               Logger::Level::E_INFO,
+               "Debug mode enabled. Images will be saved to: " + DebugPath
+            );
+
+            // Reset counter for new session
+            DebugCounter = 0;
+         } catch (const std::exception& e) {
+            Logger::log (
+               Logger::Level::E_ERROR,
+               std::string ("Failed to create debug folder: ") + e.what ()
+            );
+            DebugMode = false;
+         }
+      }
+   }
+
    try {
       if (!Tesseract) {
          Logger::log (
@@ -64,7 +105,7 @@ bool Screen::Initialize ()
          
          Tesseract->SetPageSegMode (tesseract::PSM_SINGLE_BLOCK);
          Tesseract->SetVariable ("debug_file", "/dev/null");
-         Tesseract->SetVariable ("user_defined_dpi", "70");
+         Tesseract->SetVariable ("user_defined_dpi", "300");
       }
       
       if (!Net) {
@@ -231,6 +272,31 @@ void Screen::Cleanup ()
    IsInitialized = false;
 }
 
+void Screen::SaveDebugImage (const cv::Mat& image, const std::string& name)
+{
+   if (!DebugMode || image.empty () || DebugPath.empty ()) {
+      return;
+   }
+
+   try {
+      // Create unique filename with counter
+      int counter = DebugCounter.fetch_add (1);
+      std::string filename = DebugPath + "/" + name + "_" + std::to_string (counter) + ".png";
+
+      cv::imwrite (filename, image);
+
+      Logger::log (
+         Logger::Level::E_DEBUG,
+         "Saved debug image: " + filename
+      );
+   } catch (const std::exception& e) {
+      Logger::log (
+         Logger::Level::E_ERROR,
+         std::string ("Failed to save debug image: ") + e.what ()
+      );
+   }
+}
+
 std::optional<cv::Mat> Screen::Capture () 
 {
    if (!IsInitialized) {
@@ -243,26 +309,35 @@ std::optional<cv::Mat> Screen::Capture ()
    );
    
    std::lock_guard<std::mutex> Lock (CaptureLock);
-   
-   if (CurrentCaptureMethod == CaptureMethod::WindowsGraphicsCapture && WGCInstance) {
-      // For WGC/HDR, capture the entire monitor, not just the window
-      std::optional<HMONITOR> GameMonitor = GetGameMonitor ();
 
-      if (!GameMonitor) {
+   if (CurrentCaptureMethod == CaptureMethod::WindowsGraphicsCapture && WGCInstance) {
+      // Use WGC to capture the game window directly
+      HWND gameWindow = FindWindowW (nullptr, L"Dark and Darker  ");
+
+      if (!gameWindow) {
          Logger::log (
-             Logger::Level::E_DEBUG,
-             "Failed to find game monitor for WGC capture"
+            Logger::Level::E_DEBUG,
+            "Game window not found for WGC capture"
          );
 
          return std::nullopt;
       }
 
-      std::optional<cv::Mat> frame = WGCInstance->CaptureMonitor (GameMonitor.value ());
+      if (!IsWindowVisible (gameWindow)) {
+         Logger::log (
+            Logger::Level::E_DEBUG,
+            "Game window not visible for WGC capture"
+         );
+
+         return std::nullopt;
+      }
+
+      std::optional<cv::Mat> frame = WGCInstance->CaptureWindow (gameWindow);
 
       if (!frame) {
          Logger::log (
             Logger::Level::E_WARNING,
-            "Windows Graphics Capture failed to capture monitor frame"
+            "Windows Graphics Capture failed to capture window frame"
          );
 
          return std::nullopt;
@@ -270,8 +345,10 @@ std::optional<cv::Mat> Screen::Capture ()
 
       Logger::log (
          Logger::Level::E_DEBUG,
-         "Successfully captured monitor frame via WGC"
+         "Successfully captured game window via WGC"
       );
+
+      SaveDebugImage (frame.value (), "capture_raw");
 
       return frame;
    }
@@ -306,7 +383,11 @@ std::optional<cv::Mat> Screen::Capture ()
    // Save current frame as backup before returning
    BackupFrame = LatestFrame.clone ();
    HasNewFrame = false;
-   return LatestFrame.clone ();
+
+   cv::Mat result = LatestFrame.clone ();
+   SaveDebugImage (result, "capture_raw");
+
+   return result;
 }
 
 std::optional<std::vector<cv::Rect>> Screen::FindTooltips (cv::Mat Screenshot) 
@@ -324,9 +405,11 @@ std::optional<std::vector<cv::Rect>> Screen::FindTooltips (cv::Mat Screenshot)
    int Max = std::max (Screenshot.cols, Screenshot.rows);
    
    cv::Mat Resized;
-   
+
    Resized = cv::Mat::zeros (Max, Max, CV_8UC3);
    Screenshot.copyTo (Resized (cv::Rect (0, 0, Screenshot.cols, Screenshot.rows)));
+
+   SaveDebugImage (Resized, "tooltip_1_resized");
    
    cv::Mat Frame;
    
@@ -408,33 +491,69 @@ std::optional<std::vector<cv::Rect>> Screen::FindTooltips (cv::Mat Screenshot)
    if (Nms.size () <= 0) {
       return std::nullopt;
    }
-   
+
    std::vector<cv::Rect> Tooltips;
-   
+
    for (int Idx : Nms) {
       Tooltips.push_back (Boxes [Idx]);
    }
-   
+
+   // Save debug image with detected tooltips
+   if (DebugMode) {
+      cv::Mat debugImg = Screenshot.clone ();
+      for (size_t i = 0; i < Tooltips.size (); i++) {
+         cv::rectangle (debugImg, Tooltips [i], cv::Scalar (0, 255, 0), 2);
+         cv::putText (debugImg, "Tooltip " + std::to_string (i),
+                     cv::Point (Tooltips [i].x, Tooltips [i].y - 5),
+                     cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar (0, 255, 0), 2);
+      }
+      SaveDebugImage (debugImg, "tooltip_2_detected");
+
+      // Save individual tooltip regions
+      for (size_t i = 0; i < Tooltips.size (); i++) {
+         cv::Mat tooltipRegion = Screenshot (Tooltips [i]);
+         SaveDebugImage (tooltipRegion, "tooltip_3_box_" + std::to_string (i));
+      }
+   }
+
    return Tooltips;
 }
 
-std::string Screen::Read (cv::Mat Region) 
+std::string Screen::Read (cv::Mat Region)
 {
    if (!IsInitialized) {
       throw std::runtime_error ("Cannot run OCR before initialization");
    }
-   
+
    std::lock_guard<std::mutex> Lock (TesseractLock);
-   
+
+   SaveDebugImage (Region, "ocr_1_original");
+
+   // Upscale small text for better OCR accuracy
+   int targetHeight = 48; // Minimum height for good character recognition
+   if (Region.rows < targetHeight) {
+      double scale = static_cast<double>(targetHeight) / Region.rows;
+      cv::resize (Region, Region, cv::Size(), scale, scale, cv::INTER_CUBIC);
+
+      Logger::log (
+         Logger::Level::E_DEBUG,
+         "Upscaled small text region by " + std::to_string(scale) + "x for OCR"
+      );
+
+      SaveDebugImage (Region, "ocr_2_upscaled");
+   }
+
    cv::Mat Processed = cv::Mat::zeros (
-      Region.size (), 
+      Region.size (),
       Region.type ()
    );
-   
+
    // Alpha - contrast control (1.0 - 3.0)
    // Brightness control - 0 (0 - 100)
    Region.convertTo (Processed, -1, 2, 0);
-   
+
+   SaveDebugImage (Processed, "ocr_3_contrast");
+
    // Trim border
    int BorderSize = 5;
    
@@ -446,24 +565,32 @@ std::string Screen::Read (cv::Mat Region)
    );
    
    Processed = Processed (Roi);
-   
+
+   SaveDebugImage (Processed, "ocr_4_trimmed");
+
    cv::Mat Grayscale;
    cv::Mat Binary;
    cv::Mat Sharpened;
-   
+
    cv::cvtColor (
-      Processed, 
-      Grayscale, 
+      Processed,
+      Grayscale,
       cv::COLOR_BGR2GRAY
    );
+
+   SaveDebugImage (Grayscale, "ocr_5_grayscale");
    
    cv::threshold (
-      Grayscale, 
+      Grayscale,
       Binary, 0, 255,
       cv::THRESH_BINARY_INV | cv::THRESH_OTSU
    );
-   
+
+   SaveDebugImage (Binary, "ocr_6_binary");
+
    cv::bilateralFilter (Binary, Sharpened, 5, 75, 75);
+
+   SaveDebugImage (Sharpened, "ocr_7_sharpened");
    
    Tesseract->SetImage (
       Sharpened.data, 
@@ -575,12 +702,12 @@ bool Screen::InitializeScreenCaptureLite ()
       "Screen capture manager started successfully"
    );
 
-   // 100ms = 0.1s = 10 FPS
-   CaptureManager->setFrameChangeInterval (std::chrono::milliseconds (100));
-   
+   // 33ms = ~0.033s = 30 FPS (increased for better tooltip responsiveness)
+   CaptureManager->setFrameChangeInterval (std::chrono::milliseconds (33));
+
    Logger::log (
       Logger::Level::E_INFO,
-      "Frame interval set to 100ms"
+      "Frame interval set to 33ms (30 FPS)"
    );
    
    // Give the capture system time to start and capture the first frame

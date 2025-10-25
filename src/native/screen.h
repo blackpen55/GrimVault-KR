@@ -27,14 +27,17 @@ namespace SL {
 class Screen 
 {
    public:
-   
+
    static std::string TesseractPath;
    static std::string OnnxFile;
-   
+   static bool DebugMode;
+   static std::string DebugPath;
+   static std::atomic<int> DebugCounter;
+
    ~Screen ();
    Screen ();
-   
-   bool Initialize ();
+
+   bool Initialize (const std::string& debugPath = "");
    std::optional<cv::Mat> Capture ();
    
    std::optional<std::vector<cv::Rect>> FindTooltips (cv::Mat Screenshot);
@@ -83,6 +86,9 @@ class Screen
    
    bool InitializeScreenCaptureLite ();
    bool InitializeWindowsGraphicsCapture ();
-   
+
    void Cleanup ();
+
+   // Debug helper
+   static void SaveDebugImage (const cv::Mat& image, const std::string& name);
 };

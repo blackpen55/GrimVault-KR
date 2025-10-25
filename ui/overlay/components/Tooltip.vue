@@ -37,6 +37,20 @@ const isTooltipActive = ref(false);
 const tooltipNode = ref(null);
 const tooltipVisibility = ref("hidden");
 
+// Track scan ID to ignore stale results
+const currentScanId = ref(0);
+
+// Window state for gating tooltip scans
+const windowState = ref({
+  canScan: false,
+  visible: false,
+  focused: false,
+});
+
+// Track mouse position during scan for motion compensation
+const scanStartMousePos = ref({ x: 0, y: 0 });
+const currentMousePos = ref({ x: 0, y: 0 });
+
 const markerNode = ref(null);
 
 const markerTop = ref(0);
@@ -51,6 +65,12 @@ const gameBounds = ref(null);
 
 electron.on("game:bounds", (bounds) => {
   gameBounds.value = bounds;
+});
+
+// Listen for window state updates to gate tooltip scanning
+electron.on("game:state", (state) => {
+  windowState.value = state;
+  logger.debug(`Window state updated: canScan=${state.canScan}, visible=${state.visible}, focused=${state.focused}`);
 });
 
 const item = ref({
@@ -86,8 +106,23 @@ const scan = () => {
     return;
   }
 
-  logger.debug("Checking for tooltips");
-  electron.send("scan");
+  // Gate scanning based on window state
+  if (!windowState.value.canScan) {
+    logger.debug("Scan blocked: game window not focused or not visible");
+    return;
+  }
+
+  // Increment scan ID to track this scan
+  const scanId = ++currentScanId.value;
+
+  // Capture current mouse position at scan start for motion compensation
+  scanStartMousePos.value = {
+    x: currentMousePos.value.x,
+    y: currentMousePos.value.y,
+  };
+
+  logger.debug(`Checking for tooltips (scan #${scanId})`);
+  electron.send("scan", { scanId });
 };
 
 onMouseStill(() => {
@@ -106,7 +141,13 @@ onMouseWakeup(() => {
   isTooltipActive.value = false;
 }, MOUSE_WAKEUP_DISTANCE);
 
-electron.on("clear", () => {
+electron.on("clear", (data) => {
+  // Ignore stale clear events
+  if (data?.scanId && data.scanId !== currentScanId.value) {
+    logger.debug(`Ignoring stale clear event (scanId ${data.scanId} vs current ${currentScanId.value})`);
+    return;
+  }
+
   isTooltipActive.value = false;
 });
 
@@ -123,7 +164,21 @@ electron.on("manual:scan", () => {
 onMounted(() => {
   logger.info("Tooltip mounted");
 
+  // Track current mouse position for motion compensation during scans
+  window.addEventListener("mousemove", (event) => {
+    currentMousePos.value = {
+      x: event.clientX,
+      y: event.clientY,
+    };
+  });
+
   electron.on("hover:item", async (data) => {
+    // Ignore stale scan results
+    if (data.scanId !== currentScanId.value) {
+      logger.debug(`Ignoring stale scan result (scanId ${data.scanId} vs current ${currentScanId.value})`);
+      return;
+    }
+
     isTooltipActive.value = false;
     // if (!isTooltipActive.value) {
     //   tooltipVisibility.value = 'hidden';
@@ -144,11 +199,16 @@ onMounted(() => {
     item.value.attributes.primary = data.item.primary || [];
     item.value.attributes.secondary = data.item.secondary || [];
 
-    // Update the marker position.
+    // Calculate mouse movement during scan for motion compensation
+    const mouseDeltaX = currentMousePos.value.x - scanStartMousePos.value.x;
+    const mouseDeltaY = currentMousePos.value.y - scanStartMousePos.value.y;
+
+    // Update the marker position with motion compensation
+    // Coordinates from WGC window capture are already window-relative
 
     if (props.alignment === "attached") {
-      markerTop.value = data.y - (gameBounds.value ? gameBounds.value.y : 0);
-      markerLeft.value = data.x - (gameBounds.value ? gameBounds.value.x : 0);
+      markerTop.value = data.y + mouseDeltaY;
+      markerLeft.value = data.x + mouseDeltaX;
       markerWidth.value = data.width;
       markerHeight.value = data.height;
     }

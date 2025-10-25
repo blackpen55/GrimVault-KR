@@ -20,7 +20,38 @@ let isShown = false;
 let debounceTimer = null;
 let overlayRef = null;
 let debuggingMode = false;
-let isMinimized = false;
+
+// Track window state for tooltip scanning
+let canScan = false;
+
+// Send window state to renderer for tooltip scanning gating
+function broadcastWindowState (visible, focused) {
+  if (!overlayRef) {
+    return;
+  }
+
+  // With WGC window capture, we can scan even when not focused
+  // Only require window to be visible (not minimized)
+  const newCanScan = visible;
+
+  // Only broadcast if state changed
+  if (newCanScan !== canScan) {
+    canScan = newCanScan;
+
+    overlayRef.webContents.send ('game:state', {
+      canScan: canScan,
+      visible: visible,
+      focused: focused
+    });
+
+    logger.debug (`Window state changed: canScan=${canScan}, visible=${visible}, focused=${focused}`);
+  }
+}
+
+// Export getter for current window state (for safety checks in main process)
+export function getCanScan () {
+  return canScan;
+}
 
 // Handle window event from native hook
 export function handleWindowEvent (eventData) {
@@ -49,34 +80,24 @@ function updateOverlay (eventData) {
   try {
     const { bounds, monitor, visible, focused } = eventData;
 
-    // If the window is not visible, hide the overlay
-    if (!visible) {
-      if (isShown && !debuggingMode) {
+    // With WGC window capture, overlay can stay active even when not focused
+    // Only deactivate when window is not visible (minimized/closed)
+    const isGameActive = visible;
+
+    // Game NOT active - completely deactivate overlay
+    if (!isGameActive) {
+      broadcastWindowState (visible, focused);
+      if (isShown) {
+        logger.info (`Game inactive (visible=${visible}, focused=${focused}) - hiding overlay`);
         overlayRef.hide ();
         isShown = false;
       }
       isActive = false;
-      isMinimized = false;
       previousGameBounds = null;
       return;
     }
 
-    // Handle focus changes - minimize when game loses focus
-    if (!focused && !debuggingMode) {
-      if (isShown && !isMinimized) {
-        logger.info ('Game lost focus - minimizing overlay');
-        overlayRef.minimize ();
-        isMinimized = true;
-      }
-      return;
-    }
-
-    // Game has focus - restore if minimized
-    if (focused && isMinimized && !debuggingMode) {
-      logger.info ('Game gained focus - restoring overlay');
-      overlayRef.restore ();
-      isMinimized = false;
-    }
+    // Game IS active - activate overlay
 
     // Send bounds to renderer
     overlayRef.webContents.send ('game:bounds', {
@@ -113,12 +134,14 @@ function updateOverlay (eventData) {
       overlayRef.moveTop ();
 
       isShown = true;
-      isMinimized = false;
-      logger.info ('Overlay shown via window event');
+      logger.info ('Game active - showing overlay');
     }
 
     previousGameBounds = bounds;
     isActive = true;
+
+    // Broadcast that window is now in a state where scanning is allowed
+    broadcastWindowState (visible, focused);
 
   } catch (e) {
     logger.error ('Error in handleWindowEvent:', e);

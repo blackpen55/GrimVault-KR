@@ -26,13 +26,16 @@ let native = createRequire (import.meta.url) (nativeModulePath);
 
 let tesseractModelPath;
 let onnxModelPath;
+let debugPath;
 
 if (app.isPackaged) {
   tesseractModelPath = join (ROOT, '..', 'models');
-  onnxModelPath = join (ROOT, '..', 'models', 'tooltip.onnx');  
+  onnxModelPath = join (ROOT, '..', 'models', 'tooltip.onnx');
+  debugPath = join (ROOT, '..', 'debug');
 } else {
   tesseractModelPath = join (ROOT, 'models', 'tesseract');
   onnxModelPath = join (ROOT, 'models', 'tooltip.onnx');
+  debugPath = join (ROOT, 'debug');
 }
 
 let onMessageCallback = (level, message) => {
@@ -44,7 +47,8 @@ logger.info (`Initializing native screen module`);
 let success = native.initialize (
   tesseractModelPath,
   onnxModelPath,
-  onMessageCallback
+  onMessageCallback,
+  debugPath
 );
 
 if (!success) {

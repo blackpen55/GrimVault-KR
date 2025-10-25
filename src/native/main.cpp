@@ -9,31 +9,37 @@
 std::shared_ptr<Screen> GlobalScreen = nullptr;
 std::mutex GlobalScreenMutex;
 
-Napi::Value Initialize (const Napi::CallbackInfo& Info) 
+Napi::Value Initialize (const Napi::CallbackInfo& Info)
 {
    Napi::Env Env = Info.Env ();
    Napi::HandleScope scope (Env);
-   
+
    if (Info.Length () < 3) {
       Napi::TypeError::New (
-         Env, 
-         "Wrong number of arguments. Expected: tesseractPath, onnxFile, callback"
+         Env,
+         "Wrong number of arguments. Expected: tesseractPath, onnxFile, callback, [debugPath]"
       ).ThrowAsJavaScriptException ();
-      
+
       return Env.Null ();
    }
-   
+
    if (!Info [0].IsString () || !Info [1].IsString ()) {
       Napi::TypeError::New (
-         Env, 
-         "Wrong arguments. Expected: string, string"
+         Env,
+         "Wrong arguments. Expected: string, string, function, [string]"
       ).ThrowAsJavaScriptException ();
-      
+
       return Env.Null ();
    }
-   
+
    std::string TesseractPath = Info [0].As<Napi::String> ().Utf8Value ();
    std::string OnnxFile = Info [1].As<Napi::String> ().Utf8Value ();
+   std::string DebugPath = "";
+
+   // Optional 4th parameter for debug path
+   if (Info.Length () >= 4 && Info [3].IsString ()) {
+      DebugPath = Info [3].As<Napi::String> ().Utf8Value ();
+   }
    
    {
       std::lock_guard<std::mutex> lock(GlobalScreenMutex);
@@ -56,14 +62,14 @@ Napi::Value Initialize (const Napi::CallbackInfo& Info)
    );
    
    Logger::initialize (callback);
-   
-   bool Result = GlobalScreen->Initialize ();
-   
+
+   bool Result = GlobalScreen->Initialize (DebugPath);
+
    if (!Result) {
       std::lock_guard<std::mutex> lock(GlobalScreenMutex);
       GlobalScreen.reset ();
    }
-   
+
    return Napi::Boolean::New (Env, Result);
 }
 

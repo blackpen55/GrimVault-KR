@@ -4,6 +4,7 @@ import { settings } from './settings.js';
 import { getTooltip } from './native.js';
 import { api } from './api.js';
 import { authServer } from './authServer.js';
+import { getCanScan } from './pin.js';
 
 const frontend = electron.ipcMain;
 
@@ -32,8 +33,18 @@ export function wire (overlay) {
     );
   });
 
-  frontend.on ('scan', async () => {
+  frontend.on ('scan', async (event, data) => {
+    const scanId = data?.scanId || 0;
+
     send ('scan:start');
+
+    // Safety check: Verify window state before scanning
+    if (!getCanScan ()) {
+      logger.debug ('Scan rejected: game window not in valid state for scanning');
+      send ('clear', { scanId });
+      send ('scan:finish');
+      return;
+    }
 
     let tooltip;
 
@@ -43,17 +54,20 @@ export function wire (overlay) {
       logger.error (`Error getting tooltip: ${e}`);
     }
 
+    logger.debug ('Found tooltip: ', tooltip);
+
     if (tooltip) {
       let stats = await getItemStats (tooltip.text);
 
       if (stats) {
         send ('hover:item', {
+          scanId,
           ... tooltip,
           ... stats
         });
       }
     } else {
-      send ('clear');
+      send ('clear', { scanId });
     }
 
     send ('scan:finish');
