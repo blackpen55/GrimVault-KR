@@ -104,7 +104,8 @@ function updateOverlay (eventData) {
       ... bounds,
       // x and y relative to the monitor the game is running on
       x: bounds.x - monitor.x,
-      y: bounds.y - monitor.y
+      y: bounds.y - monitor.y,
+      scale: monitor.scale || 1.0
     });
 
     // Check if position changed
@@ -115,7 +116,7 @@ function updateOverlay (eventData) {
       bounds.height !== previousGameBounds.height;
 
     if (positionChanged) {
-      logger.debug ('Updating overlay bounds via event: ', bounds);
+      logger.debug (`Updating overlay bounds via event: x=${bounds.x}, y=${bounds.y}, width=${bounds.width}, height=${bounds.height}, scale=${monitor.scale}`);
 
       overlayRef.setBounds ({
         x: bounds.x,

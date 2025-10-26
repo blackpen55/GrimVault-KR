@@ -1,6 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
-import { createPopper } from "@popperjs/core";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   MOUSE_STILL_FOR_MS,
   MOUSE_WAKEUP_DISTANCE,
@@ -28,17 +27,26 @@ const props = defineProps({
   components: {
     type: Array,
   },
-});
 
-const popperNode = ref(null);
+  debug: {
+    type: Boolean,
+    default: false,
+  },
+});
 
 const isTooltipActive = ref(false);
 
 const tooltipNode = ref(null);
+const tooltipWidth = ref(0);
+const tooltipHeight = ref(0);
 const tooltipVisibility = ref("hidden");
 
 // Track scan ID to ignore stale results
 const currentScanId = ref(0);
+
+// Track loading state for spinner
+const isLoading = ref(false);
+const errorMessage = ref(null);
 
 // Window state for gating tooltip scans
 const windowState = ref({
@@ -65,6 +73,10 @@ const gameBounds = ref(null);
 
 electron.on("game:bounds", (bounds) => {
   gameBounds.value = bounds;
+  logger.debug(`[COORDS] Game bounds received: x=${bounds.x}, y=${bounds.y}, width=${bounds.width}, height=${bounds.height}`);
+  if (bounds.scale) {
+    logger.debug(`[COORDS] DPI scale: ${bounds.scale}`);
+  }
 });
 
 // Listen for window state updates to gate tooltip scanning
@@ -100,6 +112,48 @@ const primary = computed(() =>
     (attribute) => attribute.min !== attribute.max,
   ),
 );
+
+// Computed property to determine if tooltip content should be shown
+const shouldShowContent = computed(() => {
+  // Only show content if we have marker position and actual content (not loading)
+  return markerWidth.value > 0 && (errorMessage.value !== null || isTooltipActive.value);
+});
+
+// Watch for tooltip visibility changes to measure dimensions
+watch([shouldShowContent], () => {
+  nextTick(() => {
+    if (tooltipNode.value) {
+      const rect = tooltipNode.value.getBoundingClientRect();
+      tooltipWidth.value = rect.width;
+      tooltipHeight.value = rect.height;
+      logger.debug(`Tooltip dimensions: ${tooltipWidth.value}x${tooltipHeight.value}`);
+    }
+  });
+});
+
+// Computed property for tooltip positioning
+const PADDING = 10;
+const tooltipPosition = computed(() => {
+  if (!markerWidth.value || !tooltipWidth.value || !tooltipHeight.value) {
+    return { left: 0, top: 0 };
+  }
+
+  const availableLeft = markerLeft.value;
+  const neededSpace = tooltipWidth.value + PADDING;
+  const shouldPlaceLeft = availableLeft >= neededSpace;
+
+  // Position horizontally: left of marker (preferred) or right if not enough space
+  const left = shouldPlaceLeft
+    ? -(tooltipWidth.value + PADDING)
+    : markerWidth.value + PADDING;
+
+  // Position vertically: center align with marker
+  const top = (markerHeight.value / 2) - (tooltipHeight.value / 2);
+
+  logger.debug(`Tooltip positioning: shouldPlaceLeft=${shouldPlaceLeft}, left=${left}, top=${top}`);
+
+  return { left, top };
+});
 
 const scan = () => {
   if (props.mode === modes.disabled) {
@@ -141,6 +195,11 @@ onMouseWakeup(() => {
   isTooltipActive.value = false;
 }, MOUSE_WAKEUP_DISTANCE);
 
+electron.on("scan:start", () => {
+  isLoading.value = true;
+  errorMessage.value = null;
+});
+
 electron.on("clear", (data) => {
   // Ignore stale clear events
   if (data?.scanId && data.scanId !== currentScanId.value) {
@@ -149,6 +208,8 @@ electron.on("clear", (data) => {
   }
 
   isTooltipActive.value = false;
+  isLoading.value = false;
+  errorMessage.value = null;
 });
 
 electron.on("scan:finish", () => {
@@ -179,10 +240,15 @@ onMounted(() => {
       return;
     }
 
+    // Clear previous state
+    isLoading.value = false;
+    errorMessage.value = null;
     isTooltipActive.value = false;
-    // if (!isTooltipActive.value) {
-    //   tooltipVisibility.value = 'hidden';
-    // }
+
+    // Wait for DOM to update
+    await nextTick();
+
+    logger.debug(`[COORDS] Tooltip from native: x=${data.x}, y=${data.y}, width=${data.width}, height=${data.height}`);
 
     item.value.prices.market = data.pricing.market;
     item.value.prices.density = data.pricing.density;
@@ -211,6 +277,10 @@ onMounted(() => {
       markerLeft.value = data.x + mouseDeltaX;
       markerWidth.value = data.width;
       markerHeight.value = data.height;
+
+      logger.debug(`[COORDS] Marker position set: left=${markerLeft.value}, top=${markerTop.value}, width=${markerWidth.value}, height=${markerHeight.value}`);
+      logger.debug(`[COORDS] Marker final transform: translate(${markerLeft.value}px, ${markerTop.value}px)`);
+      logger.debug(`[COORDS] Mouse delta: x=${mouseDeltaX}, y=${mouseDeltaY}`);
     }
 
     switch (props.alignment) {
@@ -238,14 +308,35 @@ onMounted(() => {
         break;
     }
 
-    // setTimeout (async () => {
-    // await popper.update ();
-    // tooltipVisibility.value = 'visible';
-    // }, 25);
-
     setMouseSleepPosition();
 
     isTooltipActive.value = true;
+  });
+
+  electron.on("hover:error", async (data) => {
+    // Ignore stale scan results
+    if (data.scanId !== currentScanId.value) {
+      logger.debug(`Ignoring stale error (scanId ${data.scanId} vs current ${currentScanId.value})`);
+      return;
+    }
+
+    isLoading.value = false;
+    isTooltipActive.value = false;
+
+    // Set error message and position
+    errorMessage.value = data.message || "Unknown error occurred";
+
+    const mouseDeltaX = currentMousePos.value.x - scanStartMousePos.value.x;
+    const mouseDeltaY = currentMousePos.value.y - scanStartMousePos.value.y;
+
+    if (props.alignment === "attached") {
+      markerTop.value = data.y + mouseDeltaY;
+      markerLeft.value = data.x + mouseDeltaX;
+      markerWidth.value = data.width || 100;
+      markerHeight.value = data.height || 50;
+    }
+
+    setMouseSleepPosition();
   });
 
   // If we are attached make small mouse movements adjust the marker position.
@@ -275,9 +366,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
-  if (popper) {
-    popper.destroy();
-  }
+  // Cleanup if needed
 });
 
 function getGradeColor(grade) {
@@ -299,189 +388,236 @@ function getGradeColor(grade) {
     ref="markerNode"
     class="absolute"
     :style="{
-      transform: `translate(${markerLeft}px, ${markerTop + (markerHeight ? markerHeight / 2 : 0)}px)`,
+      // Transform: markerLeft/markerTop are exact window-relative coords from WGC
+      // Position marker directly at the tooltip coordinates (no offset needed)
+      transform: `translate(${markerLeft}px, ${markerTop}px)`,
     }"
   >
-    <Popper
-      placement="left"
-      offsetDistance="5"
-      :show="isTooltipActive"
-      ref="popperNode"
+    <!-- Single Marker - green border on detected tooltip region (debug only) -->
+    <div
+      v-if="markerWidth > 0"
+      id="marker"
+      :class="{ 'border-2 border-green-500': props.debug }"
+      :style="{
+        width: `${markerWidth}px`,
+        height: `${markerHeight}px`,
+      }"
+    ></div>
+
+    <!-- Tooltip content - manually positioned relative to marker -->
+    <transition
+      enter-active-class="transition-opacity duration-200 ease-out"
+      enter-from-class="opacity-0"
+      enter-to-class="opacity-100"
+      leave-active-class="transition-opacity duration-150 ease-in"
+      leave-from-class="opacity-100"
+      leave-to-class="opacity-0"
     >
       <div
-        id="marker"
-        class="h-[1px]"
+        v-if="shouldShowContent"
+        ref="tooltipNode"
+        class="absolute"
+        :class="{ 'border-2 border-yellow-500': props.debug }"
         :style="{
-          width: `${markerWidth}px`,
+          left: `${tooltipPosition.left}px`,
+          top: `${tooltipPosition.top}px`,
         }"
-      ></div>
+      >
+      <!-- Error Tooltip -->
+      <div v-if="errorMessage !== null" id="tooltip">
+        <div class="tooltip-overlay"></div>
+        <div class="tooltip-content">
+          <div class="error-title-wrapper">
+            <span class="error-icon">⚠</span>
+            <span>Error</span>
+          </div>
+          <div class="tooltip-body">
+            <div class="error-message">{{ errorMessage }}</div>
+          </div>
+        </div>
+      </div>
 
-      <template #content>
-        <transition
-          enter-active-class="transition-opacity ease-out duration-200"
-          enter-from-class="opacity-0 scale-90"
-          enter-to-class="opacity-100 scale-100"
-          leave-active-class="transition-opacity ease-in duration-200"
-          leave-from-class="opacity-100 scale-100"
-          leave-to-class="opacity-0 scale-90"
-        >
-          <div id="tooltip" ref="tooltipNode">
-            <div class="tooltip-overlay"></div>
-            <div class="tooltip-content">
+      <!-- Regular Tooltip -->
+      <div v-else-if="isTooltipActive" id="tooltip">
+        <div class="tooltip-overlay"></div>
+        <div class="tooltip-content">
+          <div
+            class="tooltip-title"
+            v-if="props.components.includes('header')"
+          >
+            Item Statistics
+          </div>
+
+          <div
+            class="tooltip-body"
+            :class="{ 'mt-3': !props.components.includes('header') }"
+          >
+            <section
+              v-if="props.components.includes('primary') && primary.length"
+            >
               <div
-                class="tooltip-title"
-                v-if="props.components.includes('header')"
+                v-for="attribute in primary"
+                class="[&:not(:last-child)]:pb-2"
               >
-                Item Statistics
+                <span v-if="attribute.min !== attribute.max"
+                  >{{ attribute.display }} {{ attribute.min }} -
+                  {{ attribute.max }}</span
+                >
               </div>
+              <div class="tooltip-separator"></div>
+            </section>
 
+            <section
+              v-if="
+                props.components.includes('secondary') &&
+                item.attributes.secondary.length
+              "
+            >
               <div
-                class="tooltip-body"
-                :class="{ 'mt-3': !props.components.includes('header') }"
+                v-for="attribute in item.attributes.secondary"
+                class="[&:not(:last-child)]:pb-2"
               >
-                <section
-                  v-if="props.components.includes('primary') && primary.length"
-                >
-                  <div
-                    v-for="attribute in primary"
-                    class="[&:not(:last-child)]:pb-2"
-                  >
-                    <span v-if="attribute.min !== attribute.max"
-                      >{{ attribute.display }} {{ attribute.min }} -
-                      {{ attribute.max }}</span
-                    >
-                  </div>
-                  <div class="tooltip-separator"></div>
-                </section>
+                <span class="tooltip-attribute text-nowrap">
+                  <span
+                    >{{
+                      (attribute.value > 0
+                        ? "+"
+                        : attribute.value < 0
+                          ? "-"
+                          : "") +
+                      attribute.value +
+                      (attribute.is_percentage ? "%" : "")
+                    }}
+                  </span>
+                  <span>{{ attribute.display }}</span>
+                </span>
 
-                <section
-                  v-if="
-                    props.components.includes('secondary') &&
-                    item.attributes.secondary.length
-                  "
-                >
-                  <div
-                    v-for="attribute in item.attributes.secondary"
-                    class="[&:not(:last-child)]:pb-2"
-                  >
-                    <span class="tooltip-attribute text-nowrap">
-                      <span
-                        >{{
-                          (attribute.value > 0
-                            ? "+"
-                            : attribute.value < 0
-                              ? "-"
-                              : "") +
-                          attribute.value +
-                          (attribute.is_percentage ? "%" : "")
-                        }}
-                      </span>
-                      <span>{{ attribute.display }}</span>
-                    </span>
-
-                    <div class="text-base">
-                      ({{ attribute.min }} - {{ attribute.max }}) (<span
-                        :style="`color: ${getGradeColor(attribute.grade)}`"
-                        >{{ attribute.grade }}</span
-                      >)
-                    </div>
-                  </div>
-                  <div class="tooltip-separator"></div>
-                </section>
-
-                <section
-                  v-if="
-                    props.components.includes('details') &&
-                    (item.quality ||
-                      item.relativeQuality ||
-                      item.demand ||
-                      item.numSimilarSoldRecently)
-                  "
-                >
-                  <div class="tooltip-stats">
-                    <!-- <div
-                      v-if="item.numSimilarSoldRecently"
-                      class="tooltip-stat"
-                    >
-                      <span>Similar Sold Recently:</span>
-                      <span>{{ item.numSimilarSoldRecently }}</span>
-                    </div> -->
-                    <div v-if="item.demand" class="tooltip-stat">
-                      <span>Demand:</span>
-                      <span
-                        :style="{ color: interpolateColor(item.demand, 10) }"
-                        >{{ item.demand }} / 10</span
-                      >
-                    </div>
-                    <div v-if="item.adventurePoints" class="tooltip-stat">
-                      <span>Adventure Points:</span>
-                      <span>{{ item.adventurePoints }}</span>
-                    </div>
-                  </div>
-                  <div class="tooltip-separator"></div>
-                </section>
-
-                <section
-                  v-if="
-                    props.components.includes('quests') && item.quests.length
-                  "
-                >
-                  <div class="text-lg">
-                    <span style="color: var(--dnd-feather)">Quest Item</span>
-
-                    <div v-for="quest in item.quests" class="text-nowrap">
-                      <span style="color: var(--dnd-aqua)"
-                        >{{ quest.merchant }}
-                        <span style="color: var(--dnd-dust)"
-                          >{{ quest.title }}:</span
-                        ></span
-                      >
-                      <span class="ml-2">{{ quest.count }}x</span>
-                    </div>
-                  </div>
-                  <div class="tooltip-separator"></div>
-                </section>
-
-                <div
-                  class="mx-auto w-40"
-                  v-if="
-                    props.components.includes('pricing') &&
-                    (item.prices.market !== null || item.prices.vendor !== null)
-                  "
-                >
-                  <div
-                    class="flex items-center"
-                    v-if="item.prices.market !== null"
-                  >
-                    <span>Market:</span>
-                    <span class="gold ml-2">{{ item.prices.market }}</span>
-                  </div>
-                  <div
-                    class="flex items-center"
-                    v-if="item.prices.vendor !== null"
-                  >
-                    <span>Vendor:</span>
-                    <span class="gold ml-2">{{ item.prices.vendor }}</span>
-                  </div>
-                  <div
-                    class="flex items-center"
-                    v-if="item.prices.density !== null"
-                  >
-                    <span>Density:</span>
-                    <span class="gold ml-2">{{ item.prices.density }}</span>
-                  </div>
+                <div class="text-base">
+                  ({{ attribute.min }} - {{ attribute.max }}) (<span
+                    :style="`color: ${getGradeColor(attribute.grade)}`"
+                    >{{ attribute.grade }}</span
+                  >)
                 </div>
+              </div>
+              <div class="tooltip-separator"></div>
+            </section>
 
-                <div class="tooltip-separator"></div>
-
-                <div class="text-xs" style="color: var(--dnd-oak)">
-                  Powered by DarkerDB.com
+            <section
+              v-if="
+                props.components.includes('details') &&
+                (item.quality ||
+                  item.relativeQuality ||
+                  item.demand ||
+                  item.numSimilarSoldRecently)
+              "
+            >
+              <div class="tooltip-stats">
+                <!-- <div
+                  v-if="item.numSimilarSoldRecently"
+                  class="tooltip-stat"
+                >
+                  <span>Similar Sold Recently:</span>
+                  <span>{{ item.numSimilarSoldRecently }}</span>
+                </div> -->
+                <div v-if="item.demand" class="tooltip-stat">
+                  <span>Demand:</span>
+                  <span
+                    :style="{ color: interpolateColor(item.demand, 10) }"
+                    >{{ item.demand }} / 10</span
+                  >
                 </div>
+                <div v-if="item.adventurePoints" class="tooltip-stat">
+                  <span>Adventure Points:</span>
+                  <span>{{ item.adventurePoints }}</span>
+                </div>
+              </div>
+              <div class="tooltip-separator"></div>
+            </section>
+
+            <section
+              v-if="
+                props.components.includes('quests') && item.quests.length
+              "
+            >
+              <div class="text-lg">
+                <span style="color: var(--dnd-feather)">Quest Item</span>
+
+                <div v-for="quest in item.quests" class="text-nowrap">
+                  <span style="color: var(--dnd-aqua)"
+                    >{{ quest.merchant }}
+                    <span style="color: var(--dnd-dust)"
+                      >{{ quest.title }}:</span
+                    ></span
+                  >
+                  <span class="ml-2">{{ quest.count }}x</span>
+                </div>
+              </div>
+              <div class="tooltip-separator"></div>
+            </section>
+
+            <div
+              class="mx-auto w-40"
+              v-if="
+                props.components.includes('pricing') &&
+                (item.prices.market !== null || item.prices.vendor !== null)
+              "
+            >
+              <div
+                class="flex items-center"
+                v-if="item.prices.market !== null"
+              >
+                <span>Market:</span>
+                <span class="gold ml-2">{{ item.prices.market }}</span>
+              </div>
+              <div
+                class="flex items-center"
+                v-if="item.prices.vendor !== null"
+              >
+                <span>Vendor:</span>
+                <span class="gold ml-2">{{ item.prices.vendor }}</span>
+              </div>
+              <div
+                class="flex items-center"
+                v-if="item.prices.density !== null"
+              >
+                <span>Density:</span>
+                <span class="gold ml-2">{{ item.prices.density }}</span>
               </div>
             </div>
+
+            <div class="tooltip-separator"></div>
+
+            <div class="text-xs" style="color: var(--dnd-oak)">
+              Powered by DarkerDB.com
+            </div>
           </div>
-        </transition>
-      </template>
-    </Popper>
+        </div>
+      </div>
+      </div>
+    </transition>
   </div>
 </template>
+
+<style scoped>
+.error-title-wrapper {
+  @apply py-3 text-[1.65rem] flex items-center justify-center gap-2;
+  color: #ef4444;
+}
+
+.error-title-wrapper:after {
+  @apply content-[''] block w-full h-1 mt-2 mb-1 absolute left-0;
+  background-image: url('@assets/images/Tooltip_SeparatorThick.png');
+  background-size: contain;
+  background-position: center;
+}
+
+.error-icon {
+  font-size: 1.5rem;
+}
+
+.error-message {
+  @apply text-[1.15rem] text-center;
+  color: #fecaca;
+  line-height: 1.5;
+}
+</style>

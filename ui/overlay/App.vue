@@ -70,6 +70,7 @@ onMounted(() => {
       :mode="mode"
       :alignment="settings.general.alignment"
       :components="settings.general.components"
+      :debug="isDebugging"
     />
 
     <transition

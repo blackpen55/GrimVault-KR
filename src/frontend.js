@@ -38,6 +38,18 @@ export function wire (overlay) {
 
     send ('scan:start');
 
+    // Helper to send error events
+    const sendError = (message, tooltip = null) => {
+      send ('hover:error', {
+        scanId,
+        message,
+        x: tooltip?.x || 0,
+        y: tooltip?.y || 0,
+        width: tooltip?.width || 100,
+        height: tooltip?.height || 50
+      });
+    };
+
     // Safety check: Verify window state before scanning
     if (!getCanScan ()) {
       logger.debug ('Scan rejected: game window not in valid state for scanning');
@@ -57,14 +69,17 @@ export function wire (overlay) {
     logger.debug ('Found tooltip: ', tooltip);
 
     if (tooltip) {
-      let stats = await getItemStats (tooltip.text);
+      let result = await getItemStats (tooltip.text);
 
-      if (stats) {
+      if (result.success) {
         send ('hover:item', {
           scanId,
           ... tooltip,
-          ... stats
+          ... result.data
         });
+      } else {
+        // Error occurred during API call
+        sendError (result.error, tooltip);
       }
     } else {
       send ('clear', { scanId });
@@ -93,12 +108,42 @@ async function getItemStats (tooltipText) {
     });
 
     if (!response) {
-      return false;
+      return {
+        success: false,
+        error: 'No response from server'
+      };
     }
 
-    return response.data.body;
+    return {
+      success: true,
+      data: response.data.body
+    };
   } catch (e) {
-    logger.error (e);
-    return false;
+    logger.error ('API error:', e);
+
+    // Extract error message from response
+    let errorMessage = 'Unknown error occurred';
+
+    if (e.response) {
+      // Server responded with error status
+      if (e.response.data?.errors && Array.isArray (e.response.data.errors) && e.response.data.errors.length > 0) {
+        // Use first error from errors array
+        errorMessage = e.response.data.errors[0];
+      } else if (e.response.data?.status) {
+        // Use status message
+        errorMessage = e.response.data.status;
+      } else if (e.response.statusText) {
+        // Use HTTP status text
+        errorMessage = `${e.response.status}: ${e.response.statusText}`;
+      }
+    } else if (e.message) {
+      // Network error or other client-side error
+      errorMessage = e.message;
+    }
+
+    return {
+      success: false,
+      error: errorMessage
+    };
   }
 }
