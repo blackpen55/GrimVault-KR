@@ -14,31 +14,32 @@ Napi::Value Initialize (const Napi::CallbackInfo& Info)
    Napi::Env Env = Info.Env ();
    Napi::HandleScope scope (Env);
 
-   if (Info.Length () < 3) {
+   if (Info.Length () < 4) {
       Napi::TypeError::New (
          Env,
-         "Wrong number of arguments. Expected: tesseractPath, onnxFile, callback, [debugPath]"
+         "Wrong number of arguments. Expected: ocrModelPath, ocrDictPath, onnxFile, callback, [debugPath]"
       ).ThrowAsJavaScriptException ();
 
       return Env.Null ();
    }
 
-   if (!Info [0].IsString () || !Info [1].IsString ()) {
+   if (!Info [0].IsString () || !Info [1].IsString () || !Info [2].IsString ()) {
       Napi::TypeError::New (
          Env,
-         "Wrong arguments. Expected: string, string, function, [string]"
+         "Wrong arguments. Expected: string, string, string, function, [string]"
       ).ThrowAsJavaScriptException ();
 
       return Env.Null ();
    }
 
-   std::string TesseractPath = Info [0].As<Napi::String> ().Utf8Value ();
-   std::string OnnxFile = Info [1].As<Napi::String> ().Utf8Value ();
+   std::string OCRModelPath = Info [0].As<Napi::String> ().Utf8Value ();
+   std::string OCRDictPath = Info [1].As<Napi::String> ().Utf8Value ();
+   std::string OnnxFile = Info [2].As<Napi::String> ().Utf8Value ();
    std::string DebugPath = "";
 
-   // Optional 4th parameter for debug path
-   if (Info.Length () >= 4 && Info [3].IsString ()) {
-      DebugPath = Info [3].As<Napi::String> ().Utf8Value ();
+   // Optional 5th parameter for debug path
+   if (Info.Length () >= 5 && Info [4].IsString ()) {
+      DebugPath = Info [4].As<Napi::String> ().Utf8Value ();
    }
    
    {
@@ -46,16 +47,17 @@ Napi::Value Initialize (const Napi::CallbackInfo& Info)
       if (GlobalScreen) {
          GlobalScreen.reset ();
       }
-      
+
       GlobalScreen = std::make_shared<Screen> ();
    }
-   
-   Screen::TesseractPath = TesseractPath;
+
+   Screen::OCRModelPath = OCRModelPath;
+   Screen::OCRDictPath = OCRDictPath;
    Screen::OnnxFile = OnnxFile;
-   
+
    auto callback = Napi::ThreadSafeFunction::New (
       Env,
-      Info [2].As<Napi::Function> (),
+      Info [3].As<Napi::Function> (),
       "LogCallback",
       0,
       1

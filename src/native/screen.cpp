@@ -14,7 +14,8 @@
 #define SC_LITE_STATIC
 #include <ScreenCapture.h>
 
-std::string Screen::TesseractPath = "";
+std::string Screen::OCRModelPath = "";
+std::string Screen::OCRDictPath = "";
 std::string Screen::OnnxFile = "";
 bool Screen::DebugMode = false;
 std::string Screen::DebugPath = "";
@@ -31,10 +32,10 @@ Screen::Screen () : IsInitialized (false), MainThreadId (std::this_thread::get_i
 
 bool Screen::Initialize (const std::string& debugPath)
 {
-   if (TesseractPath.empty () || OnnxFile.empty ()) {
+   if (OCRModelPath.empty () || OCRDictPath.empty () || OnnxFile.empty ()) {
       Logger::log (
          Logger::Level::E_ERROR,
-         "Paths not set: TesseractPath and OnnxFile must be set before screen initialization"
+         "Paths not set: OCRModelPath, OCRDictPath, and OnnxFile must be set before screen initialization"
       );
 
       return false;
@@ -85,27 +86,23 @@ bool Screen::Initialize (const std::string& debugPath)
    }
 
    try {
-      if (!Tesseract) {
+      if (!OcrEngine) {
          Logger::log (
-            Logger::Level::E_INFO, 
-            "Initializing Tesseract"
+            Logger::Level::E_INFO,
+            "Initializing OCR engine"
          );
-         
-         Tesseract = std::make_unique<tesseract::TessBaseAPI> ();
-         
-         if (Tesseract->Init (TesseractPath.c_str (), "eng", tesseract::OEM_LSTM_ONLY) != 0) {
+
+         OcrEngine = std::make_unique<OCR> ();
+
+         if (!OcrEngine->Initialize (OCRModelPath, OCRDictPath)) {
             Logger::log (
                Logger::Level::E_ERROR,
-               "Failed to initialize tesseract using datapath: " + TesseractPath
+               "Failed to initialize OCR engine"
             );
-            
+
             Cleanup ();
             return false;
          }
-         
-         Tesseract->SetPageSegMode (tesseract::PSM_SINGLE_BLOCK);
-         Tesseract->SetVariable ("debug_file", "/dev/null");
-         Tesseract->SetVariable ("user_defined_dpi", "300");
       }
       
       if (!Net) {
@@ -259,16 +256,15 @@ void Screen::Cleanup ()
    LatestFrame = cv::Mat ();
    BackupFrame = cv::Mat ();
    HasNewFrame = false;
-   
-   if (Tesseract) {
-      Tesseract->End ();
-      Tesseract.reset ();
+
+   if (OcrEngine) {
+      OcrEngine.reset ();
    }
-   
+
    if (Net) {
       Net.reset ();
    }
-   
+
    IsInitialized = false;
 }
 
@@ -525,93 +521,26 @@ std::string Screen::Read (cv::Mat Region)
       throw std::runtime_error ("Cannot run OCR before initialization");
    }
 
-   std::lock_guard<std::mutex> Lock (TesseractLock);
+   std::lock_guard<std::mutex> Lock (DNNLock);
 
    SaveDebugImage (Region, "ocr_1_original");
 
-   // Upscale small text for better OCR accuracy
-   int targetHeight = 48; // Minimum height for good character recognition
-   if (Region.rows < targetHeight) {
-      double scale = static_cast<double>(targetHeight) / Region.rows;
-      cv::resize (Region, Region, cv::Size(), scale, scale, cv::INTER_CUBIC);
+   try {
+      std::string text = OcrEngine->Read (Region);
 
       Logger::log (
          Logger::Level::E_DEBUG,
-         "Upscaled small text region by " + std::to_string(scale) + "x for OCR"
+         "OCR result: " + text
       );
 
-      SaveDebugImage (Region, "ocr_2_upscaled");
-   }
-
-   cv::Mat Processed = cv::Mat::zeros (
-      Region.size (),
-      Region.type ()
-   );
-
-   // Alpha - contrast control (1.0 - 3.0)
-   // Brightness control - 0 (0 - 100)
-   Region.convertTo (Processed, -1, 2, 0);
-
-   SaveDebugImage (Processed, "ocr_3_contrast");
-
-   // Trim border
-   int BorderSize = 5;
-   
-   cv::Rect Roi (
-      BorderSize, 
-      BorderSize, 
-      Processed.cols - 2 * BorderSize,
-      Processed.rows - 2 * BorderSize
-   );
-   
-   Processed = Processed (Roi);
-
-   SaveDebugImage (Processed, "ocr_4_trimmed");
-
-   cv::Mat Grayscale;
-   cv::Mat Binary;
-   cv::Mat Sharpened;
-
-   cv::cvtColor (
-      Processed,
-      Grayscale,
-      cv::COLOR_BGR2GRAY
-   );
-
-   SaveDebugImage (Grayscale, "ocr_5_grayscale");
-   
-   cv::threshold (
-      Grayscale,
-      Binary, 0, 255,
-      cv::THRESH_BINARY_INV | cv::THRESH_OTSU
-   );
-
-   SaveDebugImage (Binary, "ocr_6_binary");
-
-   cv::bilateralFilter (Binary, Sharpened, 5, 75, 75);
-
-   SaveDebugImage (Sharpened, "ocr_7_sharpened");
-   
-   Tesseract->SetImage (
-      Sharpened.data, 
-      Sharpened.cols, 
-      Sharpened.rows,
-      Sharpened.channels (), 
-      Sharpened.step
-   );
-   
-   std::unique_ptr<char[]> Text (Tesseract->GetUTF8Text ());
-   
-   if (Text) {
-      return std::string (Text.get ());
-   } else {
+      return text;
+   } catch (const std::exception& e) {
       Logger::log (
          Logger::Level::E_ERROR,
-         "Failed to extract text from image with Tesseract"
+         "OCR error: " + std::string (e.what ())
       );
+      return std::string ();
    }
-   
-   return std::string ();
 }
 
 bool Screen::InitializeScreenCaptureLite () 

@@ -4,7 +4,6 @@
     "directxtex",
     "directxtk",
     "opencv",
-    "tesseract"
-  ],
-  "builtin-baseline": "3edabbe1407e2d4d8ce5b78bab8abf42cc966d10"
+    "onnxruntime-gpu"
+  ]
 }

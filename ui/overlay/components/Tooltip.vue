@@ -150,7 +150,7 @@ const tooltipPosition = computed(() => {
   // Position vertically: center align with marker
   const top = (markerHeight.value / 2) - (tooltipHeight.value / 2);
 
-  logger.debug(`Tooltip positioning: shouldPlaceLeft=${shouldPlaceLeft}, left=${left}, top=${top}`);
+  // logger.debug(`Tooltip positioning: shouldPlaceLeft=${shouldPlaceLeft}, left=${left}, top=${top}`);
 
   return { left, top };
 });

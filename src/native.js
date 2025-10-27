@@ -24,16 +24,19 @@ if (app.isPackaged) {
 
 let native = createRequire (import.meta.url) (nativeModulePath);
 
-let tesseractModelPath;
+let ocrModelPath;
+let ocrDictPath;
 let onnxModelPath;
 let debugPath;
 
 if (app.isPackaged) {
-  tesseractModelPath = join (ROOT, '..', 'models');
+  ocrModelPath = join (ROOT, '..', 'models', 'paddleocr', 'latin_PP-OCRv5_mobile_rec.onnx');
+  ocrDictPath = join (ROOT, '..', 'models', 'paddleocr', 'latin_pp_ocrv5_dict.txt');
   onnxModelPath = join (ROOT, '..', 'models', 'tooltip.onnx');
   debugPath = join (ROOT, '..', 'debug');
 } else {
-  tesseractModelPath = join (ROOT, 'models', 'tesseract');
+  ocrModelPath = join (ROOT, 'models', 'paddleocr', 'latin_PP-OCRv5_mobile_rec.onnx');
+  ocrDictPath = join (ROOT, 'models', 'paddleocr', 'latin_pp_ocrv5_dict.txt');
   onnxModelPath = join (ROOT, 'models', 'tooltip.onnx');
   debugPath = join (ROOT, 'debug');
 }
@@ -45,7 +48,8 @@ let onMessageCallback = (level, message) => {
 logger.info (`Initializing native screen module`);
 
 let success = native.initialize (
-  tesseractModelPath,
+  ocrModelPath,
+  ocrDictPath,
   onnxModelPath,
   onMessageCallback,
   debugPath

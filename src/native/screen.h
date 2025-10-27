@@ -1,13 +1,13 @@
 #pragma once
 
 #include "wgc.h"
+#include "ocr.h"
 #include <atomic>
 #include <mutex>
 #include <opencv2/dnn.hpp>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/imgproc.hpp>
 #include <optional>
-#include <tesseract/baseapi.h>
 #include <vector>
 #include <memory>
 #include <chrono>
@@ -28,7 +28,8 @@ class Screen
 {
    public:
 
-   static std::string TesseractPath;
+   static std::string OCRModelPath;
+   static std::string OCRDictPath;
    static std::string OnnxFile;
    static bool DebugMode;
    static std::string DebugPath;
@@ -65,10 +66,9 @@ class Screen
    
    std::mutex CaptureLock;
    std::mutex DNNLock;
-   std::mutex TesseractLock;
-   
+
    std::unique_ptr<cv::dnn::Net> Net;
-   std::unique_ptr<tesseract::TessBaseAPI> Tesseract;
+   std::unique_ptr<OCR> OcrEngine;
    
    // Capture method selection
    CaptureMethod CurrentCaptureMethod;

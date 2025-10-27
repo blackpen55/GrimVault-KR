@@ -10,10 +10,11 @@ const binding = {
     {
       "target_name": "native",
       "product_dir": "<(module_root_dir)/src/native/.build",
-      "sources": [ 
+      "sources": [
         "src/native/async.cpp",
         "src/native/logger.cpp",
         "src/native/main.cpp",
+        "src/native/ocr.cpp",
         "src/native/screen.cpp",
         "src/native/util.cpp",
         "src/native/wgc.cpp",
@@ -67,7 +68,7 @@ if (DEBUG) {
       "dxgi.lib",
       "dxguid.lib",
       "dwmapi.lib",
-      "leptonica-1.84.1d.lib",
+      "onnxruntime.lib",
       "opencv_core4d.lib",
       "opencv_dnn4d.lib",
       "opencv_highgui4d.lib",
@@ -75,7 +76,6 @@ if (DEBUG) {
       "opencv_imgproc4d.lib",
       "opencv_photo4d.lib",
       "Shcore.lib",
-      "tesseract55d.lib",
       "windowsapp.lib"
   ];
 
@@ -111,7 +111,7 @@ if (DEBUG) {
     "dxgi.lib",
     "dxguid.lib",
     "dwmapi.lib",
-    "leptonica-1.84.1.lib",
+    "onnxruntime.lib",
     "opencv_core4.lib",
     "opencv_dnn4.lib",
     "opencv_highgui4.lib",
@@ -119,7 +119,6 @@ if (DEBUG) {
     "opencv_imgproc4.lib",
     "opencv_photo4.lib",
     "Shcore.lib",
-    "tesseract55.lib",
     "windowsapp.lib"
   ];
 
