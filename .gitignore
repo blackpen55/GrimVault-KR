@@ -1,0 +1,11 @@
+/dist
+/debug
+/node_modules
+/ocr_env
+__pycache__/
+*.pyc
+/obsolete
+/src/native/.build
+/ui/overlay/dist/
+/vcpkg_installed
+/vendor

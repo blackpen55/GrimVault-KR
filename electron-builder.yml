@@ -1,0 +1,44 @@
+appId: kr.grimvault.app
+productName: GrimVault-KR
+directories:
+  output: dist
+  buildResources: resources
+files:
+  - assets/**/*
+  - node_modules/**/*
+  - package.json
+  - settings.ini
+  - korean/**/*
+  - src/**/*
+  - ui/**/*
+publish:
+  provider: s3
+  bucket: darkerdb.com
+  path: GrimVault-KR
+  updaterCacheDirName: .update
+generateUpdatesFilesForAllChannels: true
+win:
+  icon: assets/images/Icon-324x356.png
+  target:
+    - nsis
+  requestedExecutionLevel: requireAdministrator
+  extraFiles:
+    - from: src/native/.build/
+      to: resources/dlls/
+      filter:
+        - "*.dll"
+    - from: src/native/.build
+      to: resources/
+      filter:
+        - "*.node"
+    - from: models/tesseract/
+      to: resources/models/
+    - from: models/tooltip.onnx
+      to: resources/models/tooltip.onnx
+    - from: korean/
+      to: resources/korean/
+nsis:
+  oneClick: false
+  perMachine: true
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
