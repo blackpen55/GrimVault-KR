@@ -72,87 +72,92 @@ export function wire (overlay) {
       return;
     }
 
-    let tooltip;
-
     try {
-      tooltip = koreanAvailable ? await korean.getTooltip () : null;
-
-      if (!tooltip) {
-        tooltip = await getNativeTooltip ();
-      }
-    } catch (e) {
-      logger.error (`Error getting tooltip: ${e}`);
+      let tooltip;
 
       try {
-        tooltip = await getNativeTooltip ();
-      } catch (fallbackError) {
-        logger.error (`Native tooltip fallback failed: ${fallbackError}`);
-      }
-    }
+        tooltip = koreanAvailable ? await korean.getTooltip () : null;
 
-    logger.debug ('Found tooltip: ', tooltip);
+        if (!tooltip) {
+          tooltip = await getNativeTooltip ();
+        }
+      } catch (e) {
+        logger.error (`Error getting tooltip: ${e.message || e}`);
 
-    if (tooltip) {
-      if (tooltip.game_bounds) {
-        overlay.setBounds ({
-          x: tooltip.game_bounds.x,
-          y: tooltip.game_bounds.y,
-          width: tooltip.game_bounds.width,
-          height: tooltip.game_bounds.height
-        });
-        overlay.setIgnoreMouseEvents (true, { forward: true });
-        overlay.setAlwaysOnTop (true, 'screen-saver');
-        overlay.show ();
-        overlay.moveTop ();
-
-        send ('game:bounds', {
-          ... tooltip.game_bounds,
-          x: 0,
-          y: 0,
-          scale: 1.0
-        });
-
-        send ('game:state', {
-          canScan: true,
-          visible: true,
-          focused: true
-        });
+        try {
+          tooltip = await getNativeTooltip ();
+        } catch (fallbackError) {
+          logger.error (`Native tooltip fallback failed: ${fallbackError.message || fallbackError}`);
+        }
       }
 
-      if (tooltip.korean_item_name || tooltip.display_lines?.length) {
-        send ('hover:preview', {
-          scanId,
-          ...tooltip
-        });
-      }
+      logger.debug ('Found tooltip: ', tooltip);
 
-      let result;
-      const now = Date.now ();
+      if (tooltip) {
+        if (tooltip.game_bounds) {
+          overlay.setBounds ({
+            x: tooltip.game_bounds.x,
+            y: tooltip.game_bounds.y,
+            width: tooltip.game_bounds.width,
+            height: tooltip.game_bounds.height
+          });
+          overlay.setIgnoreMouseEvents (true, { forward: true });
+          overlay.setAlwaysOnTop (true, 'screen-saver');
+          overlay.show ();
+          overlay.moveTop ();
 
-      if (lastScanCache.text === tooltip.text && (now - lastScanCache.timestamp) < CACHE_TTL_MS) {
-        logger.info ('Using cached item stats result');
-        result = lastScanCache.result;
+          send ('game:bounds', {
+            ... tooltip.game_bounds,
+            x: 0,
+            y: 0,
+            scale: 1.0
+          });
+
+          send ('game:state', {
+            canScan: true,
+            visible: true,
+            focused: true
+          });
+        }
+
+        if (tooltip.korean_item_name || tooltip.display_lines?.length) {
+          send ('hover:preview', {
+            scanId,
+            ...tooltip
+          });
+        }
+
+        let result;
+        const now = Date.now ();
+
+        if (lastScanCache.text === tooltip.text && (now - lastScanCache.timestamp) < CACHE_TTL_MS) {
+          logger.info ('Using cached item stats result');
+          result = lastScanCache.result;
+        } else {
+          result = await getItemStats (tooltip.text);
+          lastScanCache = { text: tooltip.text, result, timestamp: now };
+        }
+
+        if (result.success) {
+          send ('hover:item', {
+            scanId,
+            ... tooltip,
+            ... result.data
+          });
+        } else {
+          // Error occurred during API call
+          sendError (result.error, tooltip);
+        }
       } else {
-        result = await getItemStats (tooltip.text);
-        lastScanCache = { text: tooltip.text, result, timestamp: now };
+        send ('clear', { scanId });
       }
-
-      if (result.success) {
-        send ('hover:item', {
-          scanId,
-          ... tooltip,
-          ... result.data
-        });
-      } else {
-        // Error occurred during API call
-        sendError (result.error, tooltip);
-      }
-    } else {
-      send ('clear', { scanId });
+    } catch (e) {
+      logger.error (`Scan failed: ${e.message || e}`);
+      sendError ('가격 조회 중 오류가 발생했습니다.');
+    } finally {
+      send ('scan:finish');
+      isScanning = false;
     }
-
-    send ('scan:finish');
-    isScanning = false;
   });
   
   frontend.handle ('auth:status', async () => {
@@ -202,7 +207,7 @@ async function getItemStats (tooltipText) {
       data: response.data.body
     };
   } catch (e) {
-    logger.error ('API error:', e);
+    logger.error (`API error: ${e.message || e}`);
 
     // Extract error message from response
     let errorMessage = '알 수 없는 오류가 발생했습니다';

@@ -1,4 +1,4 @@
-import electron from 'electron';
+﻿import electron from 'electron';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import winston from 'winston';
@@ -12,7 +12,20 @@ if (!existsSync (logPath)) {
   mkdirSync (logPath, { recursive: true });
 }
 
-const transport = new winston.transports.DailyRotateFile ({ 
+function safeStringify (value) {
+  const seen = new WeakSet ();
+
+  return JSON.stringify (value, (key, item) => {
+    if (typeof item === 'object' && item !== null) {
+      if (seen.has (item)) return '[Circular]';
+      seen.add (item);
+    }
+
+    return item;
+  }, 2);
+}
+
+const transport = new winston.transports.DailyRotateFile ({
   filename: join (logPath, '%DATE%.log'),
   datePattern: 'YYYY-MM-DD',
   maxSize: '2m',
@@ -30,7 +43,7 @@ const logger = winston.createLogger ({
   format: winston.format.combine (
     winston.format.timestamp (),
     winston.format.printf (({ level, message, timestamp, ... meta }) => {
-      return `${timestamp} [${level}] ${message} ${Object.keys (meta).length ? JSON.stringify (meta, null, 2) : ''}`
+      return `${timestamp} [${level}] ${message} ${Object.keys (meta).length ? safeStringify (meta) : ''}`
     })
   ),
   transports: [
@@ -46,10 +59,10 @@ if (isDebug ()) {
       winston.format.printf (({ level, message, timestamp, ...meta }) => {
         const grayColor = '\x1b[90m'; // ANSI escape code for gray
         const resetColor = '\x1b[0m';  // ANSI escape code to reset color
-        const metaString = Object.keys(meta).length 
-          ? `${grayColor}${JSON.stringify(meta, null, 2)}${resetColor}` 
+        const metaString = Object.keys(meta).length
+          ? `${grayColor}${safeStringify(meta)}${resetColor}`
           : '';
-        
+
           return `${timestamp} [${level}] ${message} ${metaString}`;
       })
     )
