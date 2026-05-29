@@ -1,4 +1,5 @@
 /dist
+/build
 /debug
 /node_modules
 /ocr_env
@@ -11,3 +12,5 @@ __pycache__/
 /vcpkg_installed
 /vendor
 .codex-dev*.log
+.ocr-exe*.log
+/korean/ocr-service/ocr-service.exe
