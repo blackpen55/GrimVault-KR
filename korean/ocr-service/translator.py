@@ -197,7 +197,7 @@ class Translator:
         if not line or PUNCTUATION_ONLY_PATTERN.match(line):
             return False
 
-        return line.startswith("+") and any(char.isdigit() for char in line)
+        return bool(re.match(r"^[+\-]\d+(\.\d+)?%?\s+[A-Za-z]", line))
 
     def _fuzzy_match_item(self, text, threshold=0.74):
         best_match = None
