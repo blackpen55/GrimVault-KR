@@ -12,9 +12,9 @@ files:
   - src/**/*
   - ui/**/*
 publish:
-  provider: s3
-  bucket: darkerdb.com
-  path: GrimVault-KR
+  provider: github
+  owner: blackpen55
+  repo: GrimVault-KR
   updaterCacheDirName: .update
 generateUpdatesFilesForAllChannels: true
 win:

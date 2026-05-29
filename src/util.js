@@ -7,15 +7,11 @@ import { join } from 'node:path';
 import { freemem, totalmem } from 'node:os';
 import { logger, logPath } from './logger.js';
 
-import nmi from 'node-machine-id';
-const { machineId } = nmi;
-
 export function isPackaged () {
   return app.isPackaged;
 }
 
 export async function logSystemInformation () {
-  logger.info (`[System] Machine ID: ${await machineId ()}`);
   logger.info (`[System] Platform: ${process.platform}`);
   logger.info (`[System] Architecture: ${process.arch}`);
   logger.info (`[System] Node Version: ${process.version}`);
@@ -55,8 +51,6 @@ export async function logSystemInformation () {
 //   try {
 //     const formData = new FormData ();
 //     formData.append ('file', createReadStream (path));
-//     formData.append ('machine_id', await machineId ());
-
 //     logger.info (`Uploading log: ${path}`);
 
 //     await api.post ('/v1/upload/logs', formData, {

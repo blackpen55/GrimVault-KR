@@ -109,10 +109,9 @@ app.on ('ready', async () => {
 
   if (settings.general.auto_updates) {
     autoUpdater.setFeedURL ({
-      provider: 's3',
-      bucket: 'darkerdb.com',
-      path: 'GrimVault-KR',
-      region: 'us-west-2'
+      provider: 'github',
+      owner: 'blackpen55',
+      repo: 'GrimVault-KR'
     });
 
     autoUpdater.checkForUpdates ();

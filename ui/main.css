@@ -3,16 +3,6 @@
 @tailwind utilities;
 
 @font-face {
-  font-family: 'SaintKDG_Light';
-  src: url('@assets/fonts/SaintKDG_Light.ttf') format('truetype');
-}
-
-@font-face {
-  font-family: 'SaintKDG_LMedium';
-  src: url('@assets/fonts/SaintKDG_Medium.ttf') format('truetype');
-}
-
-@font-face {
   font-family: 'NotoSansKR';
   src: url('@assets/fonts/NotoSansKR-Regular.ttf') format('truetype');
 }
@@ -54,7 +44,7 @@ body {
   --scale: 1;
 
   @apply m-0 p-0 overflow-hidden bg-transparent relative text-white;
-  font-family: 'NotoSansKR', 'SaintKDG_Light', sans-serif;
+  font-family: 'NotoSansKR', sans-serif;
   
   font-size: clamp(
     calc(12px * var(--scale)), 
