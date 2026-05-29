@@ -53,15 +53,15 @@ export function startService (pythonPath = 'python') {
   let cmd;
   let args;
 
-  if (existsSync (ocrExe)) {
-    cmd = ocrExe;
-    args = [];
-    logger.info (`[Korean] Starting OCR service executable: ${cmd}`);
-  } else if (existsSync (serverScript)) {
+  if (!app.isPackaged && existsSync (serverScript)) {
     const venvPython = join (ROOT, 'ocr_env', 'Scripts', 'python.exe');
     cmd = existsSync (venvPython) ? venvPython : pythonPath;
     args = [ serverScript ];
     logger.info (`[Korean] Starting OCR service: ${cmd} ${serverScript}`);
+  } else if (existsSync (ocrExe)) {
+    cmd = ocrExe;
+    args = [];
+    logger.info (`[Korean] Starting OCR service executable: ${cmd}`);
   } else {
     logger.warn (`[Korean] OCR service not found at ${serverScript}`);
     return;

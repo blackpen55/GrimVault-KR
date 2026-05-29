@@ -5,6 +5,16 @@ from difflib import SequenceMatcher
 
 KOREAN_PATTERN = re.compile(r"[\uac00-\ud7a3\u3131-\u318e]+")
 PUNCTUATION_ONLY_PATTERN = re.compile(r"^[\s:,.()'\"`-]+$")
+TREASURE_QUALITY_MAP = {
+    "궁극의": "Ultimate",
+    "금이간": "Cracked",
+    "금이 간": "Cracked",
+    "완벽한": "Perfect",
+    "왕실의": "Royal",
+    "정교한": "Exquisite",
+    "평범한": "Normal",
+    "흠이 있는": "Flawed",
+}
 
 
 class Translator:
@@ -80,7 +90,7 @@ class Translator:
             cleaned = re.sub(r"\s+", " ", cleaned).strip()
             cleaned = self._normalize_english_line(cleaned, english_terms)
 
-            if not item_line and cleaned in english_items:
+            if not item_line and self._is_known_english_item(cleaned, english_items):
                 item_line = cleaned
                 continue
 
@@ -153,11 +163,11 @@ class Translator:
 
     def _translate_line(self, line, mappings, is_first_line=False):
         if line in mappings:
-            return mappings[line]
+            return self._preserve_treasure_quality(line, mappings[line])
 
         normalized = line.replace("：", ":")
         if normalized in mappings:
-            return mappings[normalized]
+            return self._preserve_treasure_quality(normalized, mappings[normalized])
 
         if is_first_line:
             fuzzy = self._fuzzy_match_item(line)
@@ -192,6 +202,27 @@ class Translator:
                 return f"{term} {suffix}"
 
         return line
+
+    def _is_known_english_item(self, line, english_items):
+        if line in english_items:
+            return True
+
+        base_name = re.sub(r"\s+\([^)]+\)$", "", line)
+        return base_name in english_items
+
+    def _preserve_treasure_quality(self, korean_line, english_name):
+        match = re.search(r"\(([^)]+)\)\s*$", korean_line)
+        if not match:
+            return english_name
+
+        quality = TREASURE_QUALITY_MAP.get(match.group(1).strip())
+        if not quality:
+            return english_name
+
+        if english_name.endswith(f"({quality})"):
+            return english_name
+
+        return f"{english_name} ({quality})"
 
     def _is_random_option_line(self, line):
         if not line or PUNCTUATION_ONLY_PATTERN.match(line):
