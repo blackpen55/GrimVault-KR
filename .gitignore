@@ -10,3 +10,4 @@ __pycache__/
 /ui/overlay/dist/
 /vcpkg_installed
 /vendor
+.codex-dev*.log

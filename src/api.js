@@ -1,17 +1,15 @@
 import axios from 'axios';
 import electron from 'electron';
-import { isDebug } from './config.js';
 import { logger } from './logger.js';
 
 import nmi from 'node-machine-id';
 const { machineIdSync } = nmi;
 
 const { app } = electron;
+const API_BASE_URL = process.env.DARKERDB_API_BASE_URL || 'https://api.darkerdb.com';
 
 const api = axios.create ({
-  baseURL: isDebug ()
-    ? 'https://api-dev.darkerdb.com'
-    : 'https://api.darkerdb.com',
+  baseURL: API_BASE_URL,
 
   timeout: 15000,
   headers: { "User-Agent": `GrimVault v${app.getVersion ()} (${machineIdSync ()})` },
@@ -43,6 +41,8 @@ api.interceptors.response.use(
     } else {
       logger.error (`${error.name}: ${error.message}`);
     }
+
+    return Promise.reject (error);
   },
 );
 
