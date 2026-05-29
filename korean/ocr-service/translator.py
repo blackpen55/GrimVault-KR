@@ -4,6 +4,7 @@ import re
 from difflib import SequenceMatcher
 
 KOREAN_PATTERN = re.compile(r"[\uac00-\ud7a3\u3131-\u318e]+")
+PUNCTUATION_ONLY_PATTERN = re.compile(r"^[\s:,.()'\"`-]+$")
 
 
 class Translator:
@@ -64,6 +65,8 @@ class Translator:
 
         mappings = self.get_all_mappings()
         translated_lines = []
+        english_items = set(self.items.values()) | set(self.custom.values())
+        english_terms = set(mappings.values())
 
         for index, raw_line in enumerate(korean_text.strip().split("\n")):
             line = raw_line.strip()
@@ -73,9 +76,13 @@ class Translator:
             translated = self._translate_line(line, mappings, index == 0)
             cleaned = KOREAN_PATTERN.sub("", translated)
             cleaned = re.sub(r"\s+", " ", cleaned).strip()
+            cleaned = self._normalize_english_line(cleaned, english_terms)
 
-            if cleaned:
+            if self._is_useful_api_line(cleaned, len(translated_lines) == 0):
                 translated_lines.append(cleaned)
+
+        if not translated_lines or translated_lines[0] not in english_items:
+            return ""
 
         return "\n".join(translated_lines)
 
@@ -151,6 +158,41 @@ class Translator:
                 translated = translated.replace(korean, english)
 
         return translated
+
+    def _normalize_english_line(self, line, english_terms):
+        if not line:
+            return ""
+
+        for term in sorted(english_terms, key=len, reverse=True):
+            if not term or not line.startswith(term):
+                continue
+
+            suffix = line[len(term):].strip()
+            if re.match(r"^[+\-]?\d+(\.\d+)?%?$", suffix):
+                return f"{term} {suffix}"
+
+        return line
+
+    def _is_useful_api_line(self, line, is_first_line):
+        if not line or PUNCTUATION_ONLY_PATTERN.match(line):
+            return False
+
+        if is_first_line:
+            return True
+
+        if any(char.isdigit() for char in line):
+            return True
+
+        return line in {
+            "Poor",
+            "Common",
+            "Uncommon",
+            "Rare",
+            "Epic",
+            "Legendary",
+            "Unique",
+            "Artifact",
+        }
 
     def _fuzzy_match_item(self, text, threshold=0.74):
         best_match = None
