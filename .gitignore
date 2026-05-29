@@ -4,6 +4,7 @@
 /ocr_env
 __pycache__/
 *.pyc
+/korean/mapping/generated/
 /obsolete
 /src/native/.build
 /ui/overlay/dist/
