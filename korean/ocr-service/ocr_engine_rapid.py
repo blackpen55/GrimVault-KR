@@ -1,16 +1,35 @@
 class KoreanOCR:
     def __init__(self):
         try:
-            from rapidocr_onnxruntime import RapidOCR
+            from rapidocr import RapidOCR
+            from rapidocr.utils.typings import LangRec, ModelType, OCRVersion
         except ImportError as exc:
-            raise RuntimeError(
-                "rapidocr-onnxruntime is required. Install korean/ocr-service/requirements.txt."
-            ) from exc
+            try:
+                from rapidocr_onnxruntime import RapidOCR
+            except ImportError:
+                raise RuntimeError(
+                    "rapidocr is required. Install korean/ocr-service/requirements.txt."
+                ) from exc
 
-        self.engine = RapidOCR()
+            self.engine = RapidOCR()
+            self.output_style = "legacy"
+            return
+
+        self.engine = RapidOCR(params={
+            "Global.log_level": "warning",
+            "Rec.lang_type": LangRec.KOREAN,
+            "Rec.ocr_version": OCRVersion.PPOCRV5,
+            "Rec.model_type": ModelType.MOBILE,
+        })
+        self.output_style = "rapidocr3"
 
     def read(self, image):
-        result, _ = self.engine(image)
+        result = self.engine(image)
+
+        if self.output_style == "rapidocr3":
+            return "\n".join(line.strip() for line in result.txts if line.strip())
+
+        result, _ = result
 
         if not result:
             return ""

@@ -4,3 +4,4 @@ numpy>=1.26.0
 opencv-python>=4.9.0.80
 pywin32>=306
 rapidocr-onnxruntime>=1.3.24
+rapidocr>=3.8.1

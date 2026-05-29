@@ -211,6 +211,8 @@ onMouseStill(() => {
 
 onMouseWakeup(() => {
   isTooltipActive.value = false;
+  isLoading.value = false;
+  errorMessage.value = null;
 }, MOUSE_WAKEUP_DISTANCE);
 
 electron.on("scan:start", () => {
