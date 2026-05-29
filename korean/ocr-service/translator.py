@@ -66,6 +66,7 @@ class Translator:
         mappings = self.get_all_mappings()
         item_line = ""
         option_lines = []
+        rarity = self._detect_rarity(korean_text)
         english_items = set(self.items.values()) | set(self.custom.values())
         english_terms = set(mappings.values())
 
@@ -89,7 +90,12 @@ class Translator:
         if not item_line:
             return ""
 
-        return "\n".join([item_line, *option_lines])
+        translated_lines = [item_line]
+        if rarity:
+            translated_lines.append(f"Rarity: {rarity}")
+        translated_lines.extend(option_lines)
+
+        return "\n".join(translated_lines)
 
     def display_lines(self, korean_text):
         return [
@@ -99,22 +105,31 @@ class Translator:
         ]
 
     def detect_rarity(self, korean_text):
+        return self._detect_rarity(korean_text) or "Common"
+
+    def _detect_rarity(self, korean_text):
         rarity_map = {
-            "조잡": "Poor",
-            "일반": "Common",
-            "고급": "Uncommon",
-            "희귀": "Rare",
-            "영웅": "Epic",
-            "전설": "Legendary",
-            "유니크": "Unique",
-            "아티팩트": "Artifact",
+            "\ucd08\ub77c\ud55c": "Poor",
+            "\uc77c\ubc18\uc801\uc778": "Common",
+            "\uc77c\ubc18": "Common",
+            "\uace0\uae09": "Uncommon",
+            "\ud76c\uadc0\ud55c": "Rare",
+            "\uc11c\uc0ac\uc801\uc778": "Epic",
+            "\uc11c\uc0ac": "Epic",
+            "\uc601\uc6c5": "Epic",
+            "\uc804\uc124\uc801\uc778": "Legendary",
+            "\uc804\uc124": "Legendary",
+            "\uc720\uc77c\ud55c": "Unique",
+            "\uace0\uc720\ud55c": "Unique",
+            "\uc720\ub2c8\ud06c": "Unique",
+            "\uc720\ubb3c": "Artifact",
         }
 
         for korean, english in rarity_map.items():
             if korean in korean_text:
                 return english
 
-        return "Common"
+        return None
 
     def get_unmapped_terms(self, korean_text):
         mappings = self.get_all_mappings()
