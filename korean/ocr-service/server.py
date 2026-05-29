@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 import time
+import re
 
 from flask import Flask, jsonify, request
 
@@ -27,6 +28,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("grimvault-korean")
 
 app = Flask(__name__)
+HAN_PATTERN = re.compile(r"[\u3400-\u9fff]")
 
 detector = None
 ocr = None
@@ -99,6 +101,10 @@ def scan():
         original_text = ocr.read(region)
 
         if not original_text:
+            continue
+
+        if _looks_like_bad_korean_ocr(original_text):
+            logger.info("Rejected non-Korean OCR text: %s", original_text.replace("\n", " | "))
             continue
 
         if _looks_like_grimvault_overlay(original_text):
@@ -192,6 +198,12 @@ def _looks_like_grimvault_overlay(text):
         "상점가",
     )
     return any(pattern in text for pattern in patterns)
+
+
+def _looks_like_bad_korean_ocr(text):
+    # Dark and Darker Korean tooltips should not contain Han ideographs. The
+    # default RapidOCR Chinese recognizer often hallucinates them for Hangul.
+    return bool(HAN_PATTERN.search(text))
 
 
 if __name__ == "__main__":
