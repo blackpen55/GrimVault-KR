@@ -59,14 +59,14 @@ class Translator:
     def reverse_keywords(self):
         return {english: korean for korean, english in self.keywords.items()}
 
-    def translate_text(self, korean_text):
+    def translate_text(self, korean_text, rarity_override=None):
         if not korean_text:
             return ""
 
         mappings = self.get_all_mappings()
         item_line = ""
         option_lines = []
-        rarity = self._detect_rarity(korean_text)
+        rarity = rarity_override or self._detect_rarity(korean_text)
         english_items = set(self.items.values()) | set(self.custom.values())
         english_terms = set(mappings.values())
 
