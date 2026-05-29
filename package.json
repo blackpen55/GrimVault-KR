@@ -27,6 +27,7 @@
     "ini": "^5.0.0",
     "koa": "^2.15.0",
     "koa-bodyparser": "^4.4.1",
+    "koa-compose": "^4.1.0",
     "node-addon-api": "^8.3.1",
     "node-machine-id": "^1.1.12",
     "node-window-manager": "^2.2.4",
