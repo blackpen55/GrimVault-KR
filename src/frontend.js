@@ -127,6 +127,14 @@ export function wire (overlay) {
           });
         }
 
+        if (tooltip.error || !tooltip.text) {
+          sendError (
+            tooltip.error || 'OCR은 되었지만 DarkerDB에 보낼 아이템 정보를 만들지 못했습니다.',
+            tooltip
+          );
+          return;
+        }
+
         let result;
         const now = Date.now ();
 

@@ -90,6 +90,8 @@ def scan():
     if not boxes:
         return jsonify({"tooltip": None}), 200
 
+    last_error_tooltip = None
+
     for x, y, width, height in boxes:
         x = max(0, int(x))
         y = max(0, int(y))
@@ -105,17 +107,38 @@ def scan():
         if not original_text:
             continue
 
+        rarity = _detect_rarity_from_title_color(region) or translator.detect_rarity(original_text)
+
         if _looks_like_bad_korean_ocr(original_text):
             logger.info("Rejected non-Korean OCR text: %s", original_text.replace("\n", " | "))
+            last_error_tooltip = _build_error_tooltip(
+                original_text,
+                rarity,
+                game_bounds,
+                x,
+                y,
+                width,
+                height,
+                "OCR 결과가 한국어로 인식되지 않았습니다.",
+            )
             continue
 
         if _looks_like_grimvault_overlay(original_text):
             continue
 
-        rarity = _detect_rarity_from_title_color(region) or translator.detect_rarity(original_text)
         english_text = translator.translate_text(original_text, rarity)
         if not english_text:
             logger.info("OCR text had no English mapping: %s", original_text.replace("\n", " | "))
+            last_error_tooltip = _build_error_tooltip(
+                original_text,
+                rarity,
+                game_bounds,
+                x,
+                y,
+                width,
+                height,
+                "OCR은 되었지만 아이템 이름을 영어로 매핑하지 못했습니다.",
+            )
             continue
 
         lines = original_text.strip().split("\n")
@@ -141,6 +164,9 @@ def scan():
                 "height": height,
             }
         })
+
+    if last_error_tooltip:
+        return jsonify({"tooltip": last_error_tooltip}), 200
 
     return jsonify({"tooltip": None}), 200
 
@@ -208,6 +234,28 @@ def _looks_like_bad_korean_ocr(text):
     # Dark and Darker Korean tooltips should not contain Han ideographs. The
     # default RapidOCR Chinese recognizer often hallucinates them for Hangul.
     return bool(HAN_PATTERN.search(text))
+
+
+def _build_error_tooltip(original_text, rarity, game_bounds, x, y, width, height, error):
+    lines = original_text.strip().split("\n")
+    korean_item_name = lines[0].strip() if lines else ""
+
+    return {
+        "text": "",
+        "error": error,
+        "original_text": original_text,
+        "korean_item_name": korean_item_name,
+        "rarity": rarity or translator.detect_rarity(original_text),
+        "display_lines": translator.display_lines(original_text),
+        "reverse_attributes": translator.reverse_attributes(),
+        "reverse_keywords": translator.reverse_keywords(),
+        "unmapped_terms": translator.get_unmapped_terms(original_text),
+        "game_bounds": game_bounds,
+        "x": x,
+        "y": y,
+        "width": width,
+        "height": height,
+    }
 
 
 def _detect_rarity_from_title_color(region):

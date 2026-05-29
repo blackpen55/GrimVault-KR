@@ -308,6 +308,7 @@ onMounted(() => {
 
     isLoading.value = false;
     isTooltipActive.value = false;
+    applyKoreanMetadata(data);
     errorMessage.value = data.message || "알 수 없는 오류가 발생했습니다";
     positionMarker(data);
     setMouseSleepPosition();
@@ -473,6 +474,22 @@ function getGradeColor(grade) {
             </div>
             <div class="tooltip-body">
               <div class="error-message">{{ errorMessage }}</div>
+              <section v-if="koreanItemName || koreanLines.length" class="error-debug">
+                <div v-if="koreanItemName" class="debug-row">
+                  <span>인식 이름</span>
+                  <strong>{{ koreanItemName }}</strong>
+                </div>
+                <div v-if="itemRarity" class="debug-row">
+                  <span>추정 등급</span>
+                  <strong :style="{ color: getRarityColor() }">{{ itemRarity }}</strong>
+                </div>
+                <div v-if="koreanLines.length" class="debug-lines">
+                  <div class="debug-label">OCR 원문</div>
+                  <div v-for="line in koreanLines.slice(0, 8)" class="debug-line">
+                    {{ line }}
+                  </div>
+                </div>
+              </section>
             </div>
           </div>
         </div>
@@ -655,6 +672,37 @@ function getGradeColor(grade) {
   @apply text-[1.15rem] text-center;
   color: #fecaca;
   line-height: 1.5;
+}
+
+.error-debug {
+  @apply mt-4 pt-3 text-left;
+  border-top: 1px solid rgba(239, 68, 68, 0.45);
+  color: #fecaca;
+}
+
+.debug-row {
+  @apply flex justify-between gap-4 pb-1 text-[0.95rem];
+}
+
+.debug-row span,
+.debug-label {
+  color: #fca5a5;
+}
+
+.debug-lines {
+  @apply mt-2;
+}
+
+.debug-label {
+  @apply pb-1 text-[0.9rem];
+}
+
+.debug-line {
+  @apply pb-1 text-[0.9rem];
+  color: #fee2e2;
+  line-height: 1.35;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 
 .spinner-wrapper {

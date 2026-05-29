@@ -139,6 +139,7 @@ export async function getTooltip () {
 
     return {
       text: tooltip.text,
+      error: tooltip.error || '',
       original_text: tooltip.original_text || '',
       korean_item_name: tooltip.korean_item_name || '',
       rarity: tooltip.rarity || 'Common',
