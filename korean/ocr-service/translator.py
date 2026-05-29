@@ -64,7 +64,8 @@ class Translator:
             return ""
 
         mappings = self.get_all_mappings()
-        translated_lines = []
+        item_line = ""
+        option_lines = []
         english_items = set(self.items.values()) | set(self.custom.values())
         english_terms = set(mappings.values())
 
@@ -78,13 +79,17 @@ class Translator:
             cleaned = re.sub(r"\s+", " ", cleaned).strip()
             cleaned = self._normalize_english_line(cleaned, english_terms)
 
-            if self._is_useful_api_line(cleaned, len(translated_lines) == 0):
-                translated_lines.append(cleaned)
+            if not item_line and cleaned in english_items:
+                item_line = cleaned
+                continue
 
-        if not translated_lines or translated_lines[0] not in english_items:
+            if item_line and self._is_random_option_line(cleaned):
+                option_lines.append(cleaned)
+
+        if not item_line:
             return ""
 
-        return "\n".join(translated_lines)
+        return "\n".join([item_line, *option_lines])
 
     def display_lines(self, korean_text):
         return [
@@ -173,26 +178,11 @@ class Translator:
 
         return line
 
-    def _is_useful_api_line(self, line, is_first_line):
+    def _is_random_option_line(self, line):
         if not line or PUNCTUATION_ONLY_PATTERN.match(line):
             return False
 
-        if is_first_line:
-            return True
-
-        if any(char.isdigit() for char in line):
-            return True
-
-        return line in {
-            "Poor",
-            "Common",
-            "Uncommon",
-            "Rare",
-            "Epic",
-            "Legendary",
-            "Unique",
-            "Artifact",
-        }
+        return line.startswith("+") and any(char.isdigit() for char in line)
 
     def _fuzzy_match_item(self, text, threshold=0.74):
         best_match = None
