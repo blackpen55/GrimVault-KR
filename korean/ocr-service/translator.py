@@ -49,7 +49,12 @@ CANONICAL_REVERSE_ATTRIBUTES = {
     "Resourcefulness": "\uc218\uc644",
     "Physical Damage Bonus": "\ubb3c\ub9ac \ud53c\ud574 \ubcf4\ub108\uc2a4",
     "Magical Damage Bonus": "\ub9c8\ubc95 \ud53c\ud574 \ubcf4\ub108\uc2a4",
+    "Additional Magical Damage": "\ucd94\uac00 \ub9c8\ubc95 \ud53c\ud574",
 }
+
+DEFERRED_API_OPTION_PATTERNS = (
+    re.compile(r"Race Damage (?:Bonus|Reduction)$"),
+)
 
 
 class Translator:
@@ -143,7 +148,7 @@ class Translator:
         translated_lines = [item_line]
         if rarity:
             translated_lines.append(f"Rarity: {rarity}")
-        translated_lines.extend(option_lines)
+        translated_lines.extend(sorted(option_lines, key=self._api_option_priority))
 
         return "\n".join(translated_lines)
 
@@ -269,6 +274,9 @@ class Translator:
             return False
 
         return bool(re.match(r"^[+\-]\d+(\.\d+)?%?\s+[A-Za-z]", line))
+
+    def _api_option_priority(self, line):
+        return int(any(pattern.search(line) for pattern in DEFERRED_API_OPTION_PATTERNS))
 
     def _fuzzy_match_item(self, text, threshold=0.74):
         best_match = None

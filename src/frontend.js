@@ -210,9 +210,12 @@ async function getItemStats (tooltipText) {
       };
     }
 
+    const data = response.data.body;
+    await applyExactMarketPricing (data);
+
     return {
       success: true,
-      data: response.data.body
+      data
     };
   } catch (e) {
     logger.error (`API error: ${e.message || e}`);
@@ -242,6 +245,95 @@ async function getItemStats (tooltipText) {
       error: errorMessage
     };
   }
+}
+
+async function applyExactMarketPricing (data) {
+  const item = data?.item;
+  const attributes = item?.secondary || [];
+
+  if (!item?.name || !item?.rarity || attributes.length === 0) {
+    return;
+  }
+
+  const params = new URLSearchParams ({
+    item: item.name,
+    rarity: item.rarity,
+    limit: '50',
+    order: 'desc'
+  });
+
+  for (const attribute of attributes) {
+    if (!attribute?.name || attribute.value === undefined || attribute.value === null) {
+      continue;
+    }
+
+    params.append (`secondary[${attribute.name}]`, attribute.value);
+  }
+
+  try {
+    const recentSoldParams = new URLSearchParams (params);
+    recentSoldParams.set ('has_sold', 'true');
+    recentSoldParams.set ('from', new Date (Date.now () - (7 * 24 * 60 * 60 * 1000)).toISOString ());
+
+    const soldResponse = await api.get (`/v1/market?${recentSoldParams.toString ()}`);
+    const soldPrices = marketPrices (soldResponse.data?.body);
+
+    let exactMarket = median (soldPrices);
+    let exactSource = 'recent-sold';
+
+    if (exactMarket === null) {
+      const activeParams = new URLSearchParams (params);
+      activeParams.set ('has_sold', 'false');
+      activeParams.set ('has_expired', 'false');
+
+      const activeResponse = await api.get (`/v1/market?${activeParams.toString ()}`);
+      exactMarket = minimum (marketPrices (activeResponse.data?.body));
+      exactSource = 'active-lowest';
+    }
+
+    if (exactMarket === null) {
+      return;
+    }
+
+    const previousMarket = data.pricing?.market;
+    const previousDensity = data.pricing?.density;
+    data.pricing = data.pricing || {};
+    data.pricing.market = exactMarket;
+    data.pricing.exact_source = exactSource;
+
+    if (previousMarket > 0 && previousDensity > 0) {
+      data.pricing.density = Math.round (exactMarket / (previousMarket / previousDensity));
+    }
+
+    logger.info (`Applied exact market pricing (${exactSource}): ${previousMarket} -> ${exactMarket}`);
+  } catch (error) {
+    logger.warn (`Exact market pricing lookup failed: ${error.message || error}`);
+  }
+}
+
+function marketPrices (list) {
+  return (Array.isArray (list) ? list : [])
+    .map ((listing) => Number (listing.price_per_unit ?? listing.price))
+    .filter ((price) => Number.isFinite (price) && price > 0);
+}
+
+function minimum (prices) {
+  return prices.length ? Math.min (... prices) : null;
+}
+
+function median (prices) {
+  if (!prices.length) {
+    return null;
+  }
+
+  const sorted = [ ... prices ].sort ((a, b) => a - b);
+  const middle = Math.floor (sorted.length / 2);
+
+  if (sorted.length % 2) {
+    return sorted [middle];
+  }
+
+  return Math.round ((sorted [middle - 1] + sorted [middle]) / 2);
 }
 
 function translateApiError (message, tooltipText = '') {
