@@ -21,6 +21,7 @@ const OCR_URL = `http://127.0.0.1:${OCR_PORT}`;
 
 let ocrProcess = null;
 let lastServiceError = '';
+let lastServiceStderr = '';
 
 const ocrClient = axios.create ({
   baseURL: OCR_URL,
@@ -71,6 +72,7 @@ export function startService (pythonPath = 'python') {
 
   try {
     lastServiceError = '';
+    lastServiceStderr = '';
     ocrProcess = spawn (cmd, args, {
       env,
       stdio: [ 'pipe', 'pipe', 'pipe' ],
@@ -84,6 +86,10 @@ export function startService (pythonPath = 'python') {
 
     ocrProcess.stderr.on ('data', (data) => {
       const msg = data.toString ().trim ();
+      if (msg) {
+        lastServiceStderr = `${lastServiceStderr}\n${msg}`.slice (-4000);
+      }
+
       if (msg && !msg.includes ('UserWarning') && !msg.includes ('FutureWarning')) {
         logger.warn (`[Korean OCR] ${msg}`);
       }
@@ -92,7 +98,7 @@ export function startService (pythonPath = 'python') {
     ocrProcess.on ('close', (code) => {
       logger.info (`[Korean] OCR service exited with code ${code}`);
       if (code !== null && code !== 0) {
-        lastServiceError = `OCR service exited with code ${code}`;
+        lastServiceError = describeServiceFailure (code, lastServiceStderr);
       }
       ocrProcess = null;
     });
@@ -232,4 +238,32 @@ function resolveTooltipModelPath (modelsDir) {
   ];
 
   return candidates.find (candidate => existsSync (candidate)) || candidates [0];
+}
+
+function describeServiceFailure (code, stderr) {
+  const cleanStderr = stderr
+    .replace (/\u001b\[[0-9;]*m/g, '')
+    .trim ();
+
+  if (/Address already in use|Port 19529 is in use|Only one usage of each socket address/i.test (cleanStderr)) {
+    return 'OCR 포트 19529를 다른 프로세스가 사용 중입니다. 실행 중인 GrimVault-KR을 모두 종료한 뒤 다시 실행해 주세요.';
+  }
+
+  if (/Tooltip model not found/i.test (cleanStderr)) {
+    return 'tooltip.onnx 모델 파일을 찾지 못했습니다. ZIP을 새 폴더에 다시 압축 해제해 주세요.';
+  }
+
+  if (/rapidocr is required|DLL load failed|ImportError|ModuleNotFoundError/i.test (cleanStderr)) {
+    return 'OCR 런타임을 불러오지 못했습니다. ZIP을 새 폴더에 다시 압축 해제한 뒤 다시 실행해 주세요.';
+  }
+
+  const detail = cleanStderr
+    .split (/\r?\n/)
+    .map (line => line.trim ())
+    .filter (line => line && !line.startsWith ('*'))
+    .at (-1);
+
+  return detail
+    ? `OCR service exited with code ${code}: ${detail}`
+    : `OCR service exited with code ${code}`;
 }

@@ -105,7 +105,6 @@ app.on ('before-quit', () => {
 
 app.on ('ready', async () => {
   logSystemInformation ();
-  startKoreanOcr (settings.general.python_path);
 
   if (settings.general.auto_updates) {
     autoUpdater.setFeedURL ({
@@ -262,6 +261,8 @@ app.on ('ready', async () => {
   } else {
     logger.info ('Visual C++ Redistributable installed successfully or already installed');
   }
+
+  startKoreanOcr (settings.general.python_path);
 
   try {
     await authServer.start ();
