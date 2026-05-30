@@ -25,7 +25,6 @@ MAPPING_DIR = os.environ.get(
     os.path.join(os.path.dirname(__file__), "..", "mapping"),
 )
 PORT = int(os.environ.get("GRIMVAULT_OCR_PORT", "19529"))
-OCR_TOP_PADDING = 72
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("grimvault-korean")
@@ -96,10 +95,8 @@ def scan():
     for x, y, width, height in boxes:
         x = max(0, int(x))
         y = max(0, int(y))
-        top_padding = min(y, OCR_TOP_PADDING)
-        y -= top_padding
         width = min(int(width), screenshot.shape[1] - x)
-        height = min(int(height) + top_padding, screenshot.shape[0] - y)
+        height = min(int(height), screenshot.shape[0] - y)
 
         if width <= 0 or height <= 0:
             continue
