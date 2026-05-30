@@ -278,6 +278,8 @@ def _detect_rarity_from_title_color(region):
     hue = float(median_hsv[0])
     sat = float(median_hsv[1])
 
+    if (hue <= 8 or hue >= 172) and sat >= 100:
+        return "Artifact"
     if 45 <= hue <= 80 and sat >= 70:
         return "Uncommon"
     if 90 <= hue <= 115 and sat >= 70:
@@ -291,6 +293,7 @@ def _detect_rarity_from_title_color(region):
 
     median_rgb = np.median(rgb[mask], axis=0)
     targets = {
+        "Artifact": np.array([255, 0, 0]),
         "Uncommon": np.array([128, 214, 0]),
         "Rare": np.array([0, 170, 238]),
         "Epic": np.array([208, 103, 255]),

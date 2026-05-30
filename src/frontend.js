@@ -224,10 +224,10 @@ async function getItemStats (tooltipText) {
       // Server responded with error status
       if (e.response.data?.errors && Array.isArray (e.response.data.errors) && e.response.data.errors.length > 0) {
         // Use first error from errors array
-        errorMessage = translateApiError (e.response.data.errors[0]);
+        errorMessage = translateApiError (e.response.data.errors[0], tooltipText);
       } else if (e.response.data?.status) {
         // Use status message
-        errorMessage = translateApiError (e.response.data.status);
+        errorMessage = translateApiError (e.response.data.status, tooltipText);
       } else if (e.response.statusText) {
         // Use HTTP status text
         errorMessage = `${e.response.status}: ${e.response.statusText}`;
@@ -244,7 +244,11 @@ async function getItemStats (tooltipText) {
   }
 }
 
-function translateApiError (message) {
+function translateApiError (message, tooltipText = '') {
+  if (message === 'Failed to parse tooltip' && tooltipText.includes ('Rarity: Artifact')) {
+    return '유물 이름은 인식했지만 DarkerDB 서버가 아직 이 아이템의 가격 조회를 지원하지 않습니다.';
+  }
+
   const errorMap = {
     'Failed to parse tooltip': '아이템 정보를 해석하지 못했습니다. 한국어 매핑을 보강해야 할 수 있습니다.',
     'Item not found': '해당 아이템을 찾지 못했습니다.',

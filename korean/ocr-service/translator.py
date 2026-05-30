@@ -16,6 +16,41 @@ TREASURE_QUALITY_MAP = {
     "흠이 있는": "Flawed",
 }
 
+ARTIFACT_ITEMS = {
+    "abyssal trident",
+    "aegis",
+    "bloodthirst",
+    "catice",
+    "cinder",
+    "deathbloom",
+    "delirium",
+    "dryad's wrath",
+    "echo of screams",
+    "elven bow of truth",
+    "famine",
+    "fulgor",
+    "illusory",
+    "kuma's claw",
+    "kuma's fang",
+    "leviathan",
+    "life after death",
+    "nipalan",
+    "pestilence",
+    "pulverizing prayer",
+    "soulscraper",
+    "spellweaver",
+    "stinky stick",
+    "viola",
+    "zirkzi's eye",
+}
+
+CANONICAL_REVERSE_ATTRIBUTES = {
+    "Dexterity": "\uc7ac\uc8fc",
+    "Resourcefulness": "\uc218\uc644",
+    "Physical Damage Bonus": "\ubb3c\ub9ac \ud53c\ud574 \ubcf4\ub108\uc2a4",
+    "Magical Damage Bonus": "\ub9c8\ubc95 \ud53c\ud574 \ubcf4\ub108\uc2a4",
+}
+
 
 class Translator:
     def __init__(self, mapping_dir):
@@ -64,7 +99,9 @@ class Translator:
         return combined
 
     def reverse_attributes(self):
-        return {english: korean for korean, english in self.attributes.items()}
+        reverse = {english: korean for korean, english in self.attributes.items()}
+        reverse.update(CANONICAL_REVERSE_ATTRIBUTES)
+        return reverse
 
     def reverse_keywords(self):
         return {english: korean for korean, english in self.keywords.items()}
@@ -99,6 +136,9 @@ class Translator:
 
         if not item_line:
             return ""
+
+        if item_line.lower() in ARTIFACT_ITEMS:
+            rarity = "Artifact"
 
         translated_lines = [item_line]
         if rarity:
