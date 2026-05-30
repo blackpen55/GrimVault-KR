@@ -275,15 +275,15 @@ app.on ('ready', async () => {
     overlay.loadURL ('http://localhost:5173');
   }
 
-  globalShortcut.register (settings.hotkeys.toggle_mode, () => {
+  registerShortcut (settings.hotkeys.toggle_mode, () => {
     logger.info ('Toggling mode');
     overlay.webContents.send ('manual:toggle');
   });
   
-  globalShortcut.register (settings.hotkeys.run_price_check, () => {
+  registerShortcut (settings.hotkeys.run_price_check, () => {
     logger.info ('Running manual price check');
     overlay.webContents.send ('manual:scan');
-  });
+  }, true);
 
   if (isDebug ()) {
     overlay.webContents.openDevTools ({
@@ -291,7 +291,7 @@ app.on ('ready', async () => {
     });
   }
 
-  globalShortcut.register ('F7', () => {
+  registerShortcut ('F7', () => {
     logger.info ('Toggling debugger');
     overlay.webContents.send ('manual:debugger');
 
@@ -306,7 +306,29 @@ app.on ('ready', async () => {
     }
   });
 
-  globalShortcut.register ('F8', () => {
+  registerShortcut ('F8', () => {
     overlay.webContents.send ('clear');
   });
 });
+
+function registerShortcut (accelerator, callback, notifyFailure = false) {
+  const registered = globalShortcut.register (accelerator, callback);
+
+  if (registered) {
+    logger.info (`Registered global shortcut: ${accelerator}`);
+    return true;
+  }
+
+  const message = `단축키 ${accelerator}를 등록하지 못했습니다. 다른 프로그램이 같은 단축키를 사용 중인지 확인해 주세요.`;
+  logger.error (message);
+
+  if (notifyFailure) {
+    dialog.showMessageBox ({
+      type: 'error',
+      title: 'GrimVault-KR',
+      message
+    });
+  }
+
+  return false;
+}

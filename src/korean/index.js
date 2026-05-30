@@ -7,7 +7,7 @@
  */
 
 import electron from 'electron';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import axios from 'axios';
@@ -20,6 +20,7 @@ const OCR_PORT = 19529;
 const OCR_URL = `http://127.0.0.1:${OCR_PORT}`;
 
 let ocrProcess = null;
+let lastServiceError = '';
 
 const ocrClient = axios.create ({
   baseURL: OCR_URL,
@@ -63,11 +64,13 @@ export function startService (pythonPath = 'python') {
     args = [];
     logger.info (`[Korean] Starting OCR service executable: ${cmd}`);
   } else {
-    logger.warn (`[Korean] OCR service not found at ${serverScript}`);
+    lastServiceError = `OCR service executable not found: ${ocrExe}`;
+    logger.warn (`[Korean] ${lastServiceError}`);
     return;
   }
 
   try {
+    lastServiceError = '';
     ocrProcess = spawn (cmd, args, {
       env,
       stdio: [ 'pipe', 'pipe', 'pipe' ],
@@ -88,14 +91,19 @@ export function startService (pythonPath = 'python') {
 
     ocrProcess.on ('close', (code) => {
       logger.info (`[Korean] OCR service exited with code ${code}`);
+      if (code !== null && code !== 0) {
+        lastServiceError = `OCR service exited with code ${code}`;
+      }
       ocrProcess = null;
     });
 
     ocrProcess.on ('error', (err) => {
+      lastServiceError = err.message;
       logger.error (`[Korean] Failed to start OCR service: ${err.message}`);
       ocrProcess = null;
     });
   } catch (e) {
+    lastServiceError = e.message;
     logger.error (`[Korean] Error spawning OCR service: ${e.message}`);
   }
 }
@@ -106,7 +114,14 @@ export function stopService () {
   logger.info ('[Korean] Stopping OCR service');
 
   try {
-    ocrProcess.kill ();
+    if (process.platform === 'win32' && ocrProcess.pid) {
+      spawnSync ('taskkill.exe', [ '/pid', String (ocrProcess.pid), '/t', '/f' ], {
+        windowsHide: true,
+        stdio: 'ignore'
+      });
+    } else {
+      ocrProcess.kill ();
+    }
   } catch (e) {
     logger.warn (`[Korean] OCR service stop failed: ${e.message}`);
   }
@@ -123,11 +138,35 @@ export async function isAvailable () {
   }
 }
 
+export async function getStatus () {
+  if (await isAvailable ()) {
+    return { available: true, message: '' };
+  }
+
+  if (ocrProcess) {
+    return {
+      available: false,
+      message: '한국어 OCR 서비스를 시작하는 중입니다. 잠시 후 다시 F5를 눌러 주세요.'
+    };
+  }
+
+  return {
+    available: false,
+    message: lastServiceError
+      ? `한국어 OCR 서비스를 실행하지 못했습니다: ${lastServiceError}`
+      : '한국어 OCR 서비스를 사용할 수 없습니다. 앱을 다시 실행해 주세요.'
+  };
+}
+
 export async function getTooltip () {
   try {
     const response = await ocrClient.post ('/scan');
 
     if (!response.data || !response.data.tooltip) {
+      if (response.data?.error) {
+        return { error: response.data.error };
+      }
+
       return null;
     }
 

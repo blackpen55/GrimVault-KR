@@ -7,7 +7,8 @@ import { authServer } from './authServer.js';
 import { getCanScan } from './pin.js';
 import * as korean from './korean/index.js';
 
-const frontend = electron.ipcMain;
+const { dialog, ipcMain } = electron;
+const frontend = ipcMain;
 let isScanning = false;
 let lastScanCache = { text: null, result: null, timestamp: 0 };
 const CACHE_TTL_MS = 10000;
@@ -37,11 +38,29 @@ export function wire (overlay) {
     );
   });
 
+  frontend.on ('manual:scan-disabled', () => {
+    dialog.showMessageBox (overlay, {
+      type: 'info',
+      title: 'GrimVault-KR',
+      message: '가격 조회가 비활성화되어 있습니다. F6을 눌러 수동 또는 자동 모드로 변경해 주세요.'
+    });
+  });
+
   frontend.on ('scan', async (event, data) => {
     const scanId = data?.scanId || 0;
+    const isManualScan = data?.manual === true;
 
     if (isScanning) {
       logger.debug ('Scan skipped: another scan is already running');
+
+      if (isManualScan) {
+        dialog.showMessageBox (overlay, {
+          type: 'info',
+          title: 'GrimVault-KR',
+          message: '가격 조회가 이미 진행 중입니다. 잠시 기다려 주세요.'
+        });
+      }
+
       return;
     }
 
@@ -61,12 +80,30 @@ export function wire (overlay) {
       });
     };
 
+    const reportError = (message, tooltip = null) => {
+      sendError (message, tooltip);
+
+      if (isManualScan && !tooltip?.game_bounds) {
+        logger.warn (`Manual scan failed: ${message}`);
+        dialog.showMessageBox (overlay, {
+          type: 'error',
+          title: 'GrimVault-KR',
+          message
+        });
+      }
+    };
+
     // Safety check: Verify window state before scanning
-    const koreanAvailable = await korean.isAvailable ();
+    const koreanStatus = await korean.getStatus ();
+    const koreanAvailable = koreanStatus.available;
 
     if (!getCanScan () && !koreanAvailable) {
       logger.debug ('Scan rejected: game window not in valid state for scanning');
-      send ('clear', { scanId });
+      if (isManualScan) {
+        reportError (koreanStatus.message);
+      } else {
+        send ('clear', { scanId });
+      }
       send ('scan:finish');
       isScanning = false;
       return;
@@ -128,8 +165,8 @@ export function wire (overlay) {
         }
 
         if (tooltip.error || !tooltip.text) {
-          sendError (
-            tooltip.error || 'OCR은 되었지만 DarkerDB에 보낼 아이템 정보를 만들지 못했습니다.',
+          reportError (
+            translateScanError (tooltip.error) || 'OCR은 되었지만 DarkerDB에 보낼 아이템 정보를 만들지 못했습니다.',
             tooltip
           );
           return;
@@ -154,14 +191,18 @@ export function wire (overlay) {
           });
         } else {
           // Error occurred during API call
-          sendError (result.error, tooltip);
+          reportError (result.error, tooltip);
         }
       } else {
-        send ('clear', { scanId });
+        if (isManualScan) {
+          reportError ('아이템 툴팁을 찾지 못했습니다. 게임에서 아이템 툴팁을 연 뒤 F5를 다시 눌러 주세요.');
+        } else {
+          send ('clear', { scanId });
+        }
       }
     } catch (e) {
       logger.error (`Scan failed: ${e.message || e}`);
-      sendError ('가격 조회 중 오류가 발생했습니다.');
+      reportError ('가격 조회 중 오류가 발생했습니다.');
     } finally {
       send ('scan:finish');
       isScanning = false;
@@ -193,6 +234,14 @@ export function wire (overlay) {
   frontend.handle ('korean:remove-mapping', async (event, data) => {
     return await korean.removeMapping (data.korean);
   });
+}
+
+function translateScanError (message) {
+  const errorMap = {
+    'Game window not found': 'Dark and Darker 게임 창을 찾지 못했습니다. 게임 실행 상태를 확인해 주세요.'
+  };
+
+  return errorMap [message] || message;
 }
 
 async function getItemStats (tooltipText) {
