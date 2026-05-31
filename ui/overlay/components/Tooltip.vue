@@ -102,6 +102,7 @@ const item = ref({
 
   prices: {
     market: null,
+    activeLowest: null,
     live: null,
     vendor: null,
     density: null,
@@ -182,7 +183,7 @@ electron.on("game:state", (state) => {
   logger.debug(`Window state updated: canScan=${state.canScan}, visible=${state.visible}, focused=${state.focused}`);
 });
 
-const scan = (manual = false, advanced = false) => {
+const scan = (manual = false) => {
   if (props.mode === modes.disabled) {
     return;
   }
@@ -194,7 +195,7 @@ const scan = (manual = false, advanced = false) => {
   };
 
   logger.debug(`Checking for tooltips (scan #${scanId})`);
-  electron.send("scan", { scanId, manual, advanced });
+  electron.send("scan", { scanId, manual });
 };
 
 onMouseStill(() => {
@@ -249,15 +250,6 @@ electron.on("manual:scan", () => {
   scan(true);
 });
 
-electron.on("manual:scan:advanced", () => {
-  if (props.mode === modes.disabled) {
-    electron.send("manual:scan-disabled");
-    return;
-  }
-
-  scan(true, true);
-});
-
 onMounted(() => {
   logger.info("Tooltip mounted");
 
@@ -298,6 +290,7 @@ onMounted(() => {
 
     const pricing = data.pricing || {};
     item.value.prices.market = pricing.market ?? null;
+    item.value.prices.activeLowest = pricing.active_lowest ?? null;
     item.value.prices.density = pricing.density ?? null;
     item.value.prices.vendor = pricing.vendor ?? null;
     item.value.demand = data.demand ?? null;
@@ -359,6 +352,7 @@ function applyKoreanMetadata(data) {
 
 function resetItemStats() {
   item.value.prices.market = null;
+  item.value.prices.activeLowest = null;
   item.value.prices.density = null;
   item.value.prices.vendor = null;
   item.value.demand = null;
@@ -636,9 +630,10 @@ function getGradeColor(grade) {
                     <span>시장가:</span>
                     <span class="gold ml-2">{{ item.prices.market }}</span>
                   </div>
-                  <div class="flex items-center justify-center" v-if="item.prices.vendor !== null">
-                    <span>상점가:</span>
-                    <span class="gold ml-2">{{ item.prices.vendor }}</span>
+                  <div class="flex items-center justify-center">
+                    <span>경매 최저가:</span>
+                    <span v-if="item.prices.activeLowest !== null" class="gold ml-2">{{ item.prices.activeLowest }}</span>
+                    <span v-else class="ml-2">없음</span>
                   </div>
                   <div class="flex items-center justify-center" v-if="item.prices.density !== null">
                     <span>칸당 가치:</span>

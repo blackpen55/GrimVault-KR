@@ -1,5 +1,5 @@
 // import { app, BrowserWindow, ipcMain, screen } from 'electron';
-import electron, { dialog, globalShortcut, Menu, shell, Tray } from 'electron';
+import electron, { globalShortcut, Menu, shell, Tray } from 'electron';
 import updater from 'electron-updater';
 import { basename, join } from 'node:path';
 import { logger, logPath } from './logger.js';
@@ -12,6 +12,8 @@ import { wire } from './frontend.js';
 import { authServer } from './authServer.js';
 import { startWindowHooks, stopWindowHooks } from './native.js';
 import { startService as startKoreanOcr, stopService as stopKoreanOcr } from './korean/index.js';
+import { DISPLAY_VERSION } from './version.js';
+import { showToast } from './toast.js';
 
 const { app, BrowserWindow } = electron;
 const { autoUpdater } = updater;
@@ -148,13 +150,7 @@ app.on ('ready', async () => {
       label: '버전',
       type: 'normal',
       click: () => {
-        dialog.showMessageBox (
-          null,
-          {
-            title: 'GrimVault-KR',
-            message: `GrimVault-KR ${app.getVersion ()} (${app.getLocale ()})`
-          }
-        );
+        showToast (`Current version: ${DISPLAY_VERSION}`);
       }
     },
     {
@@ -286,9 +282,8 @@ app.on ('ready', async () => {
     overlay.webContents.send ('manual:scan');
   }, true);
 
-  registerShortcut (settings.hotkeys.advanced_price_check, () => {
-    logger.info ('Running advanced manual price check');
-    overlay.webContents.send ('manual:scan:advanced');
+  registerShortcut ('F1', () => {
+    showToast (`Current version: ${DISPLAY_VERSION}`);
   }, true);
 
   if (isDebug ()) {
@@ -329,11 +324,7 @@ function registerShortcut (accelerator, callback, notifyFailure = false) {
   logger.error (message);
 
   if (notifyFailure) {
-    dialog.showMessageBox ({
-      type: 'error',
-      title: 'GrimVault-KR',
-      message
-    });
+    showToast (message);
   }
 
   return false;

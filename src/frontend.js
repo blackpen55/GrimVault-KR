@@ -6,14 +6,17 @@ import { api } from './api.js';
 import { authServer } from './authServer.js';
 import { getCanScan } from './pin.js';
 import * as korean from './korean/index.js';
+import { showToast } from './toast.js';
 
-const { dialog, ipcMain } = electron;
+const { ipcMain } = electron;
 const frontend = ipcMain;
 let isScanning = false;
 let lastScanCache = { text: null, result: null, timestamp: 0 };
 const CACHE_TTL_MS = 10000;
 
 export function wire (overlay) {
+  let transientErrorTimer = null;
+
   let send = (messageType, data) => {
     logger.debug (`Sending frontend message: ${messageType}`);
     overlay.webContents.send (messageType, data);
@@ -39,27 +42,18 @@ export function wire (overlay) {
   });
 
   frontend.on ('manual:scan-disabled', () => {
-    dialog.showMessageBox (overlay, {
-      type: 'info',
-      title: 'GrimVault-KR',
-      message: '가격 조회가 비활성화되어 있습니다. F6을 눌러 수동 또는 자동 모드로 변경해 주세요.'
-    });
+    showToast ('가격 조회가 비활성화되어 있습니다. F6을 눌러 수동 또는 자동 모드로 변경해 주세요.');
   });
 
   frontend.on ('scan', async (event, data) => {
     const scanId = data?.scanId || 0;
     const isManualScan = data?.manual === true;
-    const useExactMarketPricing = data?.advanced === true;
 
     if (isScanning) {
       logger.debug ('Scan skipped: another scan is already running');
 
       if (isManualScan) {
-        dialog.showMessageBox (overlay, {
-          type: 'info',
-          title: 'GrimVault-KR',
-          message: '가격 조회가 이미 진행 중입니다. 잠시 기다려 주세요.'
-        });
+        showToast ('가격 조회가 이미 진행 중입니다. 잠시 기다려 주세요.');
       }
 
       return;
@@ -86,12 +80,20 @@ export function wire (overlay) {
 
       if (isManualScan && !tooltip?.game_bounds) {
         logger.warn (`Manual scan failed: ${message}`);
-        dialog.showMessageBox (overlay, {
-          type: 'error',
-          title: 'GrimVault-KR',
-          message
-        });
+        showToast (message);
       }
+    };
+
+    const reportTransientError = (message) => {
+      if (transientErrorTimer) {
+        clearTimeout (transientErrorTimer);
+      }
+
+      sendError (message);
+      transientErrorTimer = setTimeout (() => {
+        send ('clear', { scanId });
+        transientErrorTimer = null;
+      }, 1000);
     };
 
     // Safety check: Verify window state before scanning
@@ -101,7 +103,11 @@ export function wire (overlay) {
     if (!getCanScan () && !koreanAvailable) {
       logger.debug ('Scan rejected: game window not in valid state for scanning');
       if (isManualScan) {
-        reportError (koreanStatus.message);
+        if (koreanStatus.starting) {
+          reportTransientError (koreanStatus.message);
+        } else {
+          reportError (koreanStatus.message);
+        }
       } else {
         send ('clear', { scanId });
       }
@@ -176,16 +182,12 @@ export function wire (overlay) {
         let result;
         const now = Date.now ();
 
-        if (
-          lastScanCache.text === tooltip.text &&
-          lastScanCache.useExactMarketPricing === useExactMarketPricing &&
-          (now - lastScanCache.timestamp) < CACHE_TTL_MS
-        ) {
+        if (lastScanCache.text === tooltip.text && (now - lastScanCache.timestamp) < CACHE_TTL_MS) {
           logger.info ('Using cached item stats result');
           result = lastScanCache.result;
         } else {
-          result = await getItemStats (tooltip.text, useExactMarketPricing);
-          lastScanCache = { text: tooltip.text, useExactMarketPricing, result, timestamp: now };
+          result = await getItemStats (tooltip.text);
+          lastScanCache = { text: tooltip.text, result, timestamp: now };
         }
 
         if (result.success) {
@@ -249,7 +251,7 @@ function translateScanError (message) {
   return errorMap [message] || message;
 }
 
-async function getItemStats (tooltipText, useExactMarketPricing = false) {
+async function getItemStats (tooltipText) {
   try {
     let response = await api.get ('/v1/internal/grimvault/analyze', {
       params: {
@@ -265,9 +267,7 @@ async function getItemStats (tooltipText, useExactMarketPricing = false) {
     }
 
     const data = response.data.body;
-    if (useExactMarketPricing) {
-      await applyExactMarketPricing (data);
-    }
+    await applyExactMarketPricing (data);
 
     return {
       success: true,
@@ -331,37 +331,32 @@ async function applyExactMarketPricing (data) {
     recentSoldParams.set ('has_sold', 'true');
     recentSoldParams.set ('from', new Date (Date.now () - (7 * 24 * 60 * 60 * 1000)).toISOString ());
 
-    const soldResponse = await api.get (`/v1/market?${recentSoldParams.toString ()}`);
-    const soldPrices = marketPrices (soldResponse.data?.body);
+    const activeParams = new URLSearchParams (params);
+    activeParams.set ('has_sold', 'false');
+    activeParams.set ('has_expired', 'false');
 
-    let exactMarket = median (soldPrices);
-    let exactSource = 'recent-sold';
-
-    if (exactMarket === null) {
-      const activeParams = new URLSearchParams (params);
-      activeParams.set ('has_sold', 'false');
-      activeParams.set ('has_expired', 'false');
-
-      const activeResponse = await api.get (`/v1/market?${activeParams.toString ()}`);
-      exactMarket = minimum (marketPrices (activeResponse.data?.body));
-      exactSource = 'active-lowest';
-    }
-
-    if (exactMarket === null) {
-      return;
-    }
+    const [ soldResponse, activeResponse ] = await Promise.all ([
+      api.get (`/v1/market?${recentSoldParams.toString ()}`),
+      api.get (`/v1/market?${activeParams.toString ()}`)
+    ]);
 
     const previousMarket = data.pricing?.market;
     const previousDensity = data.pricing?.density;
+    const exactMarket = median (marketPrices (soldResponse.data?.body));
+    const activeLowest = minimum (marketPrices (activeResponse.data?.body));
     data.pricing = data.pricing || {};
-    data.pricing.market = exactMarket;
-    data.pricing.exact_source = exactSource;
+    data.pricing.active_lowest = activeLowest;
 
-    if (previousMarket > 0 && previousDensity > 0) {
+    if (exactMarket !== null) {
+      data.pricing.market = exactMarket;
+      data.pricing.exact_source = 'recent-sold';
+    }
+
+    if (exactMarket !== null && previousMarket > 0 && previousDensity > 0) {
       data.pricing.density = Math.round (exactMarket / (previousMarket / previousDensity));
     }
 
-    logger.info (`Applied exact market pricing (${exactSource}): ${previousMarket} -> ${exactMarket}`);
+    logger.info (`Applied market pricing: median=${exactMarket} active-lowest=${activeLowest}`);
   } catch (error) {
     logger.warn (`Exact market pricing lookup failed: ${error.message || error}`);
   }
@@ -385,11 +380,9 @@ function median (prices) {
   const sorted = [ ... prices ].sort ((a, b) => a - b);
   const middle = Math.floor (sorted.length / 2);
 
-  if (sorted.length % 2) {
-    return sorted [middle];
-  }
-
-  return Math.round ((sorted [middle - 1] + sorted [middle]) / 2);
+  return sorted.length % 2
+    ? sorted [middle]
+    : Math.round ((sorted [middle - 1] + sorted [middle]) / 2);
 }
 
 function translateApiError (message, tooltipText = '') {

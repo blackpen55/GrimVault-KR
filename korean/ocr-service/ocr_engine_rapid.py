@@ -17,6 +17,8 @@ class KoreanOCR:
 
         self.engine = RapidOCR(params={
             "Global.log_level": "warning",
+            "Global.use_cls": False,
+            "EngineConfig.onnxruntime.use_dml": True,
             "Rec.lang_type": LangRec.KOREAN,
             "Rec.ocr_version": OCRVersion.PPOCRV5,
             "Rec.model_type": ModelType.MOBILE,

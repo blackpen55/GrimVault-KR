@@ -82,15 +82,19 @@ def health():
 def scan():
     start = time.time()
     screenshot, game_bounds = capture_game_window()
+    capture_elapsed = int((time.time() - start) * 1000)
 
     if screenshot is None:
         return jsonify({"tooltip": None, "error": "Game window not found"}), 200
 
+    detect_start = time.time()
     boxes = detector.find_tooltips(screenshot)
+    detect_elapsed = int((time.time() - detect_start) * 1000)
     if not boxes:
         return jsonify({"tooltip": None}), 200
 
     last_error_tooltip = None
+    ocr_elapsed = 0
 
     for x, y, width, height in boxes:
         x = max(0, int(x))
@@ -102,7 +106,9 @@ def scan():
             continue
 
         region = screenshot[y:y + height, x:x + width]
+        ocr_start = time.time()
         original_text = ocr.read(region)
+        ocr_elapsed += int((time.time() - ocr_start) * 1000)
 
         if not original_text:
             continue
@@ -145,6 +151,13 @@ def scan():
         korean_item_name = lines[0].strip() if lines else ""
         elapsed = int((time.time() - start) * 1000)
         logger.info("Korean OCR text: %s", original_text.replace("\n", " | "))
+        logger.info(
+            "Korean scan stages: capture=%sms detect=%sms ocr=%sms other=%sms",
+            capture_elapsed,
+            detect_elapsed,
+            ocr_elapsed,
+            max(0, elapsed - capture_elapsed - detect_elapsed - ocr_elapsed),
+        )
         logger.info("Korean scan complete in %sms: %s", elapsed, english_text.replace("\n", " | "))
 
         return jsonify({

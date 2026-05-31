@@ -46,7 +46,6 @@ settings.general.python_path = settings.general.python_path || 'python';
 
 settings.hotkeys.toggle_mode = toHotkey (settings.hotkeys.toggle_mode) || 'Ctrl+F6';
 settings.hotkeys.run_price_check = toHotkey (settings.hotkeys.run_price_check) || 'F5';
-settings.hotkeys.advanced_price_check = toHotkey (settings.hotkeys.advanced_price_check) || 'F4';
 
 function toBool (s) {
   if (s === true || s === 'true') return true;

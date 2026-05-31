@@ -152,6 +152,7 @@ export async function getStatus () {
   if (ocrProcess) {
     return {
       available: false,
+      starting: true,
       message: '한국어 OCR 서비스를 시작하는 중입니다. 잠시 후 다시 F5를 눌러 주세요.'
     };
   }

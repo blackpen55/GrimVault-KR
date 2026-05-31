@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { app, dialog } from 'electron';
 import { download } from 'electron-dl';
 import { logger } from './logger.js';
+import { showToast } from './toast.js';
 
 // VC++ 2015-2022 x64 registry keys
 // Visual Studio 2015, 2017, 2019, and 2022
@@ -103,20 +104,13 @@ async function installVCRedist (window) {
     // Cleanup downloaded file
     unlinkSync (downloadPath);
 
-    dialog.showMessageBox (window, {
-      type: 'info',
-      message: 'Installation Complete',
-      detail: 'Visual C++ Redistributable has been installed successfully.'
-    });
+    showToast ('Visual C++ Redistributable has been installed successfully.');
 
     return true;
   } catch (error) {
     logger.error (`VCRedist installation error: ${error}`);
 
-    dialog.showErrorBox (
-      'Installation Error',
-      'Failed to install Visual C++ Redistributable. Please download and install manually.'
-    );
+    showToast ('Failed to install Visual C++ Redistributable. Please download and install manually.');
   
     return false;
   }
