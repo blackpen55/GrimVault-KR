@@ -49,6 +49,7 @@ export function wire (overlay) {
   frontend.on ('scan', async (event, data) => {
     const scanId = data?.scanId || 0;
     const isManualScan = data?.manual === true;
+    const useExactMarketPricing = data?.advanced === true;
 
     if (isScanning) {
       logger.debug ('Scan skipped: another scan is already running');
@@ -175,12 +176,16 @@ export function wire (overlay) {
         let result;
         const now = Date.now ();
 
-        if (lastScanCache.text === tooltip.text && (now - lastScanCache.timestamp) < CACHE_TTL_MS) {
+        if (
+          lastScanCache.text === tooltip.text &&
+          lastScanCache.useExactMarketPricing === useExactMarketPricing &&
+          (now - lastScanCache.timestamp) < CACHE_TTL_MS
+        ) {
           logger.info ('Using cached item stats result');
           result = lastScanCache.result;
         } else {
-          result = await getItemStats (tooltip.text);
-          lastScanCache = { text: tooltip.text, result, timestamp: now };
+          result = await getItemStats (tooltip.text, useExactMarketPricing);
+          lastScanCache = { text: tooltip.text, useExactMarketPricing, result, timestamp: now };
         }
 
         if (result.success) {
@@ -244,7 +249,7 @@ function translateScanError (message) {
   return errorMap [message] || message;
 }
 
-async function getItemStats (tooltipText) {
+async function getItemStats (tooltipText, useExactMarketPricing = false) {
   try {
     let response = await api.get ('/v1/internal/grimvault/analyze', {
       params: {
@@ -260,7 +265,9 @@ async function getItemStats (tooltipText) {
     }
 
     const data = response.data.body;
-    await applyExactMarketPricing (data);
+    if (useExactMarketPricing) {
+      await applyExactMarketPricing (data);
+    }
 
     return {
       success: true,

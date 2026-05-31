@@ -182,7 +182,7 @@ electron.on("game:state", (state) => {
   logger.debug(`Window state updated: canScan=${state.canScan}, visible=${state.visible}, focused=${state.focused}`);
 });
 
-const scan = (manual = false) => {
+const scan = (manual = false, advanced = false) => {
   if (props.mode === modes.disabled) {
     return;
   }
@@ -194,7 +194,7 @@ const scan = (manual = false) => {
   };
 
   logger.debug(`Checking for tooltips (scan #${scanId})`);
-  electron.send("scan", { scanId, manual });
+  electron.send("scan", { scanId, manual, advanced });
 };
 
 onMouseStill(() => {
@@ -247,6 +247,15 @@ electron.on("manual:scan", () => {
   }
 
   scan(true);
+});
+
+electron.on("manual:scan:advanced", () => {
+  if (props.mode === modes.disabled) {
+    electron.send("manual:scan-disabled");
+    return;
+  }
+
+  scan(true, true);
 });
 
 onMounted(() => {

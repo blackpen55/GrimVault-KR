@@ -286,6 +286,11 @@ app.on ('ready', async () => {
     overlay.webContents.send ('manual:scan');
   }, true);
 
+  registerShortcut (settings.hotkeys.advanced_price_check, () => {
+    logger.info ('Running advanced manual price check');
+    overlay.webContents.send ('manual:scan:advanced');
+  }, true);
+
   if (isDebug ()) {
     overlay.webContents.openDevTools ({
       mode: 'detach'
