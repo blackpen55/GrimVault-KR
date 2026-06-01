@@ -15,6 +15,7 @@ let lastScanCache = { text: null, result: null, timestamp: 0 };
 const CACHE_TTL_MS = 10000;
 const MARKET_CACHE_TTL_MS = 60000;
 const MARKET_PAGE_LIMIT = 50;
+const QUICK_SALE_UNDERCUT = 10;
 const ATTRIBUTE_PRESENCE_RANGE = '>=-999999';
 const FALLBACK_PRICE_RANGE_GROUPS = [
   [ '0:100', '100:250', '250:500', '500:1000' ],
@@ -370,7 +371,7 @@ function applyListingPricing (data) {
     data.pricing.similar_listing = similarCandidate !== exactCandidate
       ? similarCandidate
       : null;
-    data.pricing.quick_sale = quickCandidate > 10 ? quickCandidate - 10 : null;
+    data.pricing.quick_sale = quickCandidate === null ? null : quickCandidate - QUICK_SALE_UNDERCUT;
   };
 
   const marketPromise = getMarketListings (`sold:${recentSoldParams.toString ()}`, recentSoldParams)
@@ -466,7 +467,7 @@ async function getMarketListings (cacheKey, params) {
   return promise;
 }
 
-async function getLowestMarketPrice (params) {
+async function getLowestMarketPrice (params, predicate = () => true) {
   let cursor = null;
   let lowest = null;
   const seenCursors = new Set ();
@@ -479,7 +480,7 @@ async function getLowestMarketPrice (params) {
     }
 
     const listings = await getMarketListings (`lowest:${pageParams.toString ()}`, pageParams);
-    lowest = minimum ([ lowest, ... activeMarketPrices (listings) ].filter ((price) => price !== null));
+    lowest = minimum ([ lowest, ... activeMarketPrices (listings, predicate) ].filter ((price) => price !== null));
 
     if (listings.length < MARKET_PAGE_LIMIT) {
       return lowest;
@@ -505,7 +506,7 @@ async function getLowestBaseListingPrice (params) {
     const candidates = await Promise.all (
       ranges.map (async (range) => {
         const rangeParams = new URLSearchParams (params);
-        rangeParams.set ('price_per_unit', range);
+        rangeParams.set ('price', range);
         const listings = await getMarketListings (`fallback:${rangeParams.toString ()}`, rangeParams);
         return { listings, params: rangeParams };
       })
@@ -517,8 +518,8 @@ async function getLowestBaseListingPrice (params) {
       }
 
       const price = candidate.listings.length < MARKET_PAGE_LIMIT
-        ? minimum (activeMarketPrices (candidate.listings))
-        : await getLowestMarketPrice (candidate.params);
+        ? minimum (activeMarketPrices (candidate.listings, hasUsableQuickSalePrice))
+        : await getLowestMarketPrice (candidate.params, hasUsableQuickSalePrice);
 
       if (price !== null) {
         return price;
@@ -526,7 +527,7 @@ async function getLowestBaseListingPrice (params) {
     }
   }
 
-  return getLowestMarketPrice (params);
+  return getLowestMarketPrice (params, hasUsableQuickSalePrice);
 }
 
 function isPresenceOnlySimilarAttribute (attribute) {
@@ -535,17 +536,22 @@ function isPresenceOnlySimilarAttribute (attribute) {
 
 function marketPrices (list) {
   return (Array.isArray (list) ? list : [])
-    .map ((listing) => Number (listing.price_per_unit ?? listing.price))
+    .map ((listing) => Number (listing.price ?? listing.price_per_unit))
     .filter ((price) => Number.isFinite (price) && price > 0);
 }
 
-function activeMarketPrices (list) {
+function hasUsableQuickSalePrice (listing) {
+  return Number (listing.price ?? listing.price_per_unit) > QUICK_SALE_UNDERCUT;
+}
+
+function activeMarketPrices (list, predicate = () => true) {
   return marketPrices ((Array.isArray (list) ? list : []).filter ((listing) => {
     const expiresAt = Date.parse (listing.expires_at);
 
     return listing.has_sold !== true
       && listing.has_expired !== true
-      && (!Number.isFinite (expiresAt) || expiresAt > Date.now ());
+      && (!Number.isFinite (expiresAt) || expiresAt > Date.now ())
+      && predicate (listing);
   }));
 }
 
