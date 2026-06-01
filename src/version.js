@@ -1,1 +1,1 @@
-export const DISPLAY_VERSION = '0.1.2.15';
+export const DISPLAY_VERSION = '0.1.2.16';

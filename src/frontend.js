@@ -370,7 +370,7 @@ function applyListingPricing (data) {
     data.pricing.similar_listing = similarCandidate !== exactCandidate
       ? similarCandidate
       : null;
-    data.pricing.quick_sale = quickCandidate === null ? null : Math.max (0, quickCandidate - 10);
+    data.pricing.quick_sale = quickCandidate > 10 ? quickCandidate - 10 : null;
   };
 
   const marketPromise = getMarketListings (`sold:${recentSoldParams.toString ()}`, recentSoldParams)
