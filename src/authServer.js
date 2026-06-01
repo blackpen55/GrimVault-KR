@@ -14,6 +14,7 @@ class AuthServer {
     this.server = null;
     this.port = 7777;
     this.credentialsPath = path.join (app.getPath ('userData'), 'credentials.json');
+    this.credentials = undefined;
     
     this.setupMiddleware ();
     this.setupRoutes ();
@@ -128,17 +129,24 @@ class AuthServer {
     const dir = path.dirname (this.credentialsPath);
     await fs.mkdir (dir, { recursive: true });
     await fs.writeFile (this.credentialsPath, JSON.stringify (credentials, null, 2));
+    this.credentials = credentials;
   }
 
   async loadCredentials () {
+    if (this.credentials !== undefined) {
+      return this.credentials;
+    }
+
     try {
       const data = await fs.readFile (this.credentialsPath, 'utf8');
-      return JSON.parse (data);
+      this.credentials = JSON.parse (data);
+      return this.credentials;
     } catch (error) {
       if (error.code !== 'ENOENT') {
         logger.error ('Failed to load credentials:', error);
       }
-      return null;
+      this.credentials = null;
+      return this.credentials;
     }
   }
 
@@ -155,6 +163,8 @@ class AuthServer {
         throw error;
       }
     }
+
+    this.credentials = null;
   }
 
   async getApiKey () {

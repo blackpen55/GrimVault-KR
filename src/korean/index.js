@@ -22,6 +22,8 @@ const OCR_URL = `http://127.0.0.1:${OCR_PORT}`;
 let ocrProcess = null;
 let lastServiceError = '';
 let lastServiceStderr = '';
+let lastAvailabilityCheck = { available: false, timestamp: 0 };
+const AVAILABILITY_TTL_MS = 5000;
 
 const ocrClient = axios.create ({
   baseURL: OCR_URL,
@@ -73,6 +75,7 @@ export function startService (pythonPath = 'python') {
   try {
     lastServiceError = '';
     lastServiceStderr = '';
+    lastAvailabilityCheck = { available: false, timestamp: 0 };
     ocrProcess = spawn (cmd, args, {
       env,
       stdio: [ 'pipe', 'pipe', 'pipe' ],
@@ -133,13 +136,21 @@ export function stopService () {
   }
 
   ocrProcess = null;
+  lastAvailabilityCheck = { available: false, timestamp: Date.now () };
 }
 
-export async function isAvailable () {
+export async function isAvailable (force = false) {
+  if (!force && (Date.now () - lastAvailabilityCheck.timestamp) < AVAILABILITY_TTL_MS) {
+    return lastAvailabilityCheck.available;
+  }
+
   try {
     const response = await ocrClient.get ('/health');
-    return response.data?.status === 'ok';
+    const available = response.data?.status === 'ok';
+    lastAvailabilityCheck = { available, timestamp: Date.now () };
+    return available;
   } catch (e) {
+    lastAvailabilityCheck = { available: false, timestamp: Date.now () };
     return false;
   }
 }
@@ -168,6 +179,7 @@ export async function getStatus () {
 export async function getTooltip () {
   try {
     const response = await ocrClient.post ('/scan');
+    lastAvailabilityCheck = { available: true, timestamp: Date.now () };
 
     if (!response.data || !response.data.tooltip) {
       if (response.data?.error) {
@@ -200,6 +212,7 @@ export async function getTooltip () {
       height: tooltip.height,
     };
   } catch (e) {
+    lastAvailabilityCheck = { available: false, timestamp: Date.now () };
     logger.warn (`[Korean] OCR scan unavailable: ${e.message}`);
     return null;
   }

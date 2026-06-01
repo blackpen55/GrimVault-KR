@@ -13,6 +13,15 @@ const frontend = ipcMain;
 let isScanning = false;
 let lastScanCache = { text: null, result: null, timestamp: 0 };
 const CACHE_TTL_MS = 10000;
+const MARKET_CACHE_TTL_MS = 60000;
+const MARKET_PAGE_LIMIT = 50;
+const ATTRIBUTE_PRESENCE_RANGE = '>=-999999';
+const FALLBACK_PRICE_RANGE_GROUPS = [
+  [ '0:100', '100:250', '250:500', '500:1000' ],
+  [ '1000:2500', '2500:5000', '5000:10000', '10000:25000' ],
+  [ '25000:100000', '100000:1000000' ]
+];
+const marketCache = new Map ();
 
 export function wire (overlay) {
   let transientErrorTimer = null;
@@ -191,6 +200,10 @@ export function wire (overlay) {
         }
 
         if (result.success) {
+          result.pricingPromises?.forEach ((pricingPromise) => pricingPromise.then (() => {
+            send ('hover:pricing', { scanId, pricing: result.data.pricing });
+          }));
+
           send ('hover:item', {
             scanId,
             ... tooltip,
@@ -267,11 +280,17 @@ async function getItemStats (tooltipText) {
     }
 
     const data = response.data.body;
-    await applyExactMarketPricing (data);
+    data.pricing = data.pricing || {};
+    data.pricing.exact_listing = null;
+    data.pricing.similar_listing = null;
+    data.pricing.quick_sale = null;
+    data.pricing.pending = { market: true, exact: true, similar: true, quick: true };
+    const pricingPromises = applyListingPricing (data);
 
     return {
       success: true,
-      data
+      data,
+      pricingPromises
     };
   } catch (e) {
     logger.error (`API error: ${e.message || e}`);
@@ -303,69 +322,256 @@ async function getItemStats (tooltipText) {
   }
 }
 
-async function applyExactMarketPricing (data) {
+function applyListingPricing (data) {
   const item = data?.item;
   const attributes = item?.secondary || [];
 
-  if (!item?.name || !item?.rarity || attributes.length === 0) {
-    return;
+  if (!item?.name || !item?.rarity) {
+    data.pricing.pending = { market: false, exact: false, similar: false, quick: false };
+    return [];
   }
 
-  const params = new URLSearchParams ({
+  const validAttributes = attributes.filter ((attribute) =>
+    attribute?.name && attribute.value !== undefined && attribute.value !== null
+  );
+  const baseParams = new URLSearchParams ({
     item: item.name,
     rarity: item.rarity,
-    limit: '50',
-    order: 'desc'
+    limit: String (MARKET_PAGE_LIMIT),
+    order: 'asc',
+    condense: 'true',
+    has_sold: 'false',
+    has_expired: 'false'
   });
+  const exactParams = new URLSearchParams (baseParams);
+  const similarParams = new URLSearchParams (baseParams);
+  const quickParams = new URLSearchParams (baseParams);
 
-  for (const attribute of attributes) {
-    if (!attribute?.name || attribute.value === undefined || attribute.value === null) {
-      continue;
-    }
-
-    params.append (`secondary[${attribute.name}]`, attribute.value);
+  for (const attribute of validAttributes) {
+    exactParams.append (`secondary[${attribute.name}]`, attribute.value);
+    similarParams.append (
+      `secondary[${attribute.name}]`,
+      isPresenceOnlySimilarAttribute (attribute) ? ATTRIBUTE_PRESENCE_RANGE : attribute.value
+    );
+    quickParams.append (`secondary[${attribute.name}]`, ATTRIBUTE_PRESENCE_RANGE);
   }
 
-  try {
-    const recentSoldParams = new URLSearchParams (params);
-    recentSoldParams.set ('has_sold', 'true');
-    recentSoldParams.set ('from', new Date (Date.now () - (7 * 24 * 60 * 60 * 1000)).toISOString ());
+  const previousMarket = data.pricing.market;
+  const previousDensity = data.pricing.density;
+  const recentSoldParams = new URLSearchParams (exactParams);
+  recentSoldParams.set ('has_sold', 'true');
+  recentSoldParams.delete ('has_expired');
+  recentSoldParams.set ('order', 'desc');
+  recentSoldParams.set ('from', new Date (Date.now () - (7 * 24 * 60 * 60 * 1000)).toISOString ());
 
-    const activeParams = new URLSearchParams (params);
-    activeParams.set ('has_sold', 'false');
-    activeParams.set ('has_expired', 'false');
+  let exactCandidate = null;
+  let similarCandidate = null;
+  let quickCandidate = null;
+  let quickLoaded = false;
+  const updateListingPrices = () => {
+    data.pricing.exact_listing = exactCandidate;
+    data.pricing.similar_listing = similarCandidate !== exactCandidate
+      ? similarCandidate
+      : null;
+    const provisionalQuick = minimum ([ exactCandidate, similarCandidate ].filter ((price) => price !== null));
+    const quickLowest = quickLoaded ? quickCandidate : provisionalQuick;
+    data.pricing.quick_sale = quickLowest === null ? null : Math.max (0, quickLowest - 10);
+  };
 
-    const [ soldResponse, activeResponse ] = await Promise.all ([
-      api.get (`/v1/market?${recentSoldParams.toString ()}`),
-      api.get (`/v1/market?${activeParams.toString ()}`)
-    ]);
+  const marketPromise = getMarketListings (`sold:${recentSoldParams.toString ()}`, recentSoldParams)
+    .then ((listings) => {
+      const market = median (marketPrices (listings));
 
-    const previousMarket = data.pricing?.market;
-    const previousDensity = data.pricing?.density;
-    const exactMarket = median (marketPrices (soldResponse.data?.body));
-    const activeLowest = minimum (marketPrices (activeResponse.data?.body));
-    data.pricing = data.pricing || {};
-    data.pricing.active_lowest = activeLowest;
+      if (market !== null) {
+        data.pricing.market = market;
+      }
 
-    if (exactMarket !== null) {
-      data.pricing.market = exactMarket;
-      data.pricing.exact_source = 'recent-sold';
-    }
+      if (market !== null && previousMarket > 0 && previousDensity > 0) {
+        data.pricing.density = Math.round (market / (previousMarket / previousDensity));
+      }
 
-    if (exactMarket !== null && previousMarket > 0 && previousDensity > 0) {
-      data.pricing.density = Math.round (exactMarket / (previousMarket / previousDensity));
-    }
+      logger.info (`Applied market pricing: median=${market}`);
+    })
+    .catch ((error) => {
+      logger.warn (`Market pricing lookup failed: ${error.message || error}`);
+    })
+    .finally (() => {
+      data.pricing.pending.market = false;
+    });
 
-    logger.info (`Applied market pricing: median=${exactMarket} active-lowest=${activeLowest}`);
-  } catch (error) {
-    logger.warn (`Exact market pricing lookup failed: ${error.message || error}`);
+  if (validAttributes.length === 0) {
+    data.pricing.pending.exact = false;
+    data.pricing.pending.similar = false;
+
+    const quickPromise = getLowestFallbackPrice (baseParams)
+      .then ((price) => {
+        quickCandidate = price;
+        quickLoaded = true;
+        updateListingPrices ();
+        logger.info (`Applied no-attribute quick sale pricing: ${data.pricing.quick_sale}`);
+      })
+      .catch ((error) => {
+        logger.warn (`No-attribute quick sale pricing lookup failed: ${error.message || error}`);
+      })
+      .finally (() => {
+        data.pricing.pending.quick = false;
+      });
+
+    return [ marketPromise, quickPromise ];
   }
+
+  const exactPromise = getLowestMarketPrice (exactParams)
+    .then ((price) => {
+      exactCandidate = price;
+      updateListingPrices ();
+      logger.info (`Applied exact listing price: ${exactCandidate}`);
+    })
+    .catch ((error) => {
+      logger.warn (`Exact listing pricing lookup failed: ${error.message || error}`);
+    })
+    .finally (() => {
+      data.pricing.pending.exact = false;
+    });
+
+  const similarPromise = getLowestMarketPrice (similarParams)
+    .then ((price) => {
+      similarCandidate = price;
+      updateListingPrices ();
+      logger.info (`Applied similar listing price: ${data.pricing.similar_listing}`);
+    })
+    .catch ((error) => {
+      logger.warn (`Similar listing pricing lookup failed: ${error.message || error}`);
+    })
+    .finally (() => {
+      data.pricing.pending.similar = false;
+    });
+
+  const quickPromise = getLowestMarketPrice (quickParams)
+    .then (async (price) => {
+      quickCandidate = price ?? await getLowestFallbackPrice (baseParams);
+      quickLoaded = true;
+      updateListingPrices ();
+      logger.info (`Applied quick sale pricing: ${data.pricing.quick_sale}`);
+    })
+    .catch ((error) => {
+      logger.warn (`Quick sale pricing lookup failed: ${error.message || error}`);
+    })
+    .finally (() => {
+      data.pricing.pending.quick = false;
+    });
+
+  return [ marketPromise, exactPromise, similarPromise, quickPromise ];
+}
+
+async function getMarketListings (cacheKey, params) {
+  const cached = marketCache.get (cacheKey);
+
+  if (cached && (Date.now () - cached.timestamp) < MARKET_CACHE_TTL_MS) {
+    logger.info (`Using cached active listings: ${cacheKey}`);
+    return cached.listings ?? cached.promise;
+  }
+
+  const promise = api.get (`/v1/market?${params.toString ()}`)
+    .then ((response) => {
+      const listings = Array.isArray (response.data?.body) ? response.data.body : [];
+      marketCache.set (cacheKey, { listings, timestamp: Date.now () });
+      return listings;
+    })
+    .catch ((error) => {
+      marketCache.delete (cacheKey);
+      throw error;
+    });
+
+  marketCache.set (cacheKey, { promise, timestamp: Date.now () });
+  return promise;
+}
+
+async function getLowestMarketPrice (params, predicate = () => true) {
+  let cursor = null;
+  let lowest = null;
+  const seenCursors = new Set ();
+
+  while (true) {
+    const pageParams = new URLSearchParams (params);
+
+    if (cursor !== null) {
+      pageParams.set ('cursor', cursor);
+    }
+
+    const listings = await getMarketListings (`lowest:${pageParams.toString ()}`, pageParams);
+    lowest = minimum ([ lowest, ... activeMarketPrices (listings, predicate) ].filter ((price) => price !== null));
+
+    if (listings.length < MARKET_PAGE_LIMIT) {
+      return lowest;
+    }
+
+    const nextCursor = Math.max (
+      ... listings
+        .map ((listing) => Number (listing.cursor))
+        .filter ((listingCursor) => Number.isFinite (listingCursor))
+    ) + 1;
+
+    if (!Number.isFinite (nextCursor) || seenCursors.has (nextCursor)) {
+      return lowest;
+    }
+
+    seenCursors.add (nextCursor);
+    cursor = nextCursor;
+  }
+}
+
+async function getLowestFallbackPrice (params) {
+  for (const ranges of FALLBACK_PRICE_RANGE_GROUPS) {
+    const candidates = await Promise.all (
+      ranges.map (async (range) => {
+        const rangeParams = new URLSearchParams (params);
+        rangeParams.set ('price_per_unit', range);
+        const listings = await getMarketListings (`fallback:${rangeParams.toString ()}`, rangeParams);
+        return { listings, params: rangeParams };
+      })
+    );
+
+    for (const candidate of candidates) {
+      if (candidate.listings.length === 0) {
+        continue;
+      }
+
+      const price = candidate.listings.length < MARKET_PAGE_LIMIT
+        ? minimum (activeMarketPrices (candidate.listings, hasNoSecondaryAttributes))
+        : await getLowestMarketPrice (candidate.params, hasNoSecondaryAttributes);
+
+      if (price !== null) {
+        return price;
+      }
+    }
+  }
+
+  return getLowestMarketPrice (params, hasNoSecondaryAttributes);
+}
+
+function isPresenceOnlySimilarAttribute (attribute) {
+  return attribute.is_percentage === true || !Number.isInteger (Number (attribute.value));
+}
+
+function hasNoSecondaryAttributes (listing) {
+  return !Object.keys (listing).some ((key) => key.startsWith ('secondary_'));
 }
 
 function marketPrices (list) {
   return (Array.isArray (list) ? list : [])
     .map ((listing) => Number (listing.price_per_unit ?? listing.price))
     .filter ((price) => Number.isFinite (price) && price > 0);
+}
+
+function activeMarketPrices (list, predicate = () => true) {
+  return marketPrices ((Array.isArray (list) ? list : []).filter ((listing) => {
+    const expiresAt = Date.parse (listing.expires_at);
+
+    return listing.has_sold !== true
+      && listing.has_expired !== true
+      && (!Number.isFinite (expiresAt) || expiresAt > Date.now ())
+      && predicate (listing);
+  }));
 }
 
 function minimum (prices) {

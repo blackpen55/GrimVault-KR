@@ -1,16 +1,50 @@
+import logging
+
 import cv2
 import numpy as np
+
+try:
+    import onnxruntime as ort
+except ImportError:
+    ort = None
 
 MODEL_WIDTH = 640
 MODEL_HEIGHT = 640
 MINIMUM_OBJECT_CONFIDENCE = 0.90
 NMS_SCORE_THRESHOLD = 0.25
 NMS_THRESHOLD = 0.45
+logger = logging.getLogger("grimvault-korean")
 
 
 class TooltipDetector:
     def __init__(self, model_path):
-        self.net = cv2.dnn.readNetFromONNX(model_path)
+        self.model_path = model_path
+        self.net = None
+        self.session = None
+
+        if ort is not None:
+            providers = ort.get_available_providers()
+            preferred = [
+                provider
+                for provider in ("DmlExecutionProvider", "CPUExecutionProvider")
+                if provider in providers
+            ]
+
+            if preferred:
+                try:
+                    self.session = ort.InferenceSession(model_path, providers=preferred)
+                    self.input_name = self.session.get_inputs()[0].name
+                    logger.info("Tooltip detector providers: %s", self.session.get_providers())
+                    return
+                except Exception as exc:
+                    logger.warning("Tooltip detector DirectML initialization failed: %s", exc)
+
+        self._load_opencv()
+
+    def _load_opencv(self):
+        self.session = None
+        self.net = cv2.dnn.readNetFromONNX(self.model_path)
+        logger.info("Tooltip detector provider: OpenCV CPU")
 
     def find_tooltips(self, screenshot):
         if screenshot is None or screenshot.size == 0:
@@ -29,8 +63,17 @@ class TooltipDetector:
             crop=False,
         )
 
-        self.net.setInput(blob)
-        outputs = self.net.forward(self.net.getUnconnectedOutLayersNames())
+        if self.session is not None:
+            try:
+                outputs = self.session.run(None, {self.input_name: blob})
+            except Exception as exc:
+                logger.warning("Tooltip detector DirectML inference failed: %s", exc)
+                self._load_opencv()
+                self.net.setInput(blob)
+                outputs = self.net.forward(self.net.getUnconnectedOutLayersNames())
+        else:
+            self.net.setInput(blob)
+            outputs = self.net.forward(self.net.getUnconnectedOutLayersNames())
         output = outputs[0]
         rows = output.shape[2]
         dimensions = output.shape[1]
