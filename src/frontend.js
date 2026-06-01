@@ -360,9 +360,7 @@ function applyListingPricing (data) {
   let similarCandidate = null;
   const updateListingPrices = () => {
     data.pricing.exact_listing = exactCandidate;
-    data.pricing.similar_listing = similarCandidate !== exactCandidate
-      ? similarCandidate
-      : null;
+    data.pricing.similar_listing = similarCandidate;
   };
 
   const marketPromise = getMarketListings (`sold:${recentSoldParams.toString ()}`, recentSoldParams)
@@ -485,7 +483,7 @@ function isPresenceOnlySimilarAttribute (attribute) {
 
 function marketPrices (list) {
   return (Array.isArray (list) ? list : [])
-    .map ((listing) => Number (listing.price ?? listing.price_per_unit))
+    .map ((listing) => Number (listing.price_per_unit ?? listing.price))
     .filter ((price) => Number.isFinite (price) && price > 0);
 }
 
