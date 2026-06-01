@@ -40,7 +40,7 @@ const tooltipWidth = ref(0);
 const tooltipHeight = ref(0);
 const currentScanId = ref(0);
 const isLoading = ref(false);
-const pricingPending = ref({ market: false, exact: false, similar: false, quick: false });
+const pricingPending = ref({ market: false, exact: false, similar: false });
 const errorMessage = ref(null);
 const koreanItemName = ref("");
 const koreanLines = ref([]);
@@ -105,7 +105,6 @@ const item = ref({
     market: null,
     exactListing: null,
     similarListing: null,
-    quickSale: null,
     live: null,
     vendor: null,
     density: null,
@@ -130,7 +129,6 @@ watch(
     () => item.value.prices.market,
     () => item.value.prices.exactListing,
     () => item.value.prices.similarListing,
-    () => item.value.prices.quickSale,
     () => item.value.prices.density,
     () => item.value.attributes.secondary.length,
     () => koreanLines.value.length,
@@ -221,7 +219,7 @@ onMouseStill(() => {
 onMouseWakeup(() => {
   isTooltipActive.value = false;
   isLoading.value = false;
-  pricingPending.value = { market: false, exact: false, similar: false, quick: false };
+  pricingPending.value = { market: false, exact: false, similar: false };
   errorMessage.value = null;
 }, MOUSE_WAKEUP_DISTANCE);
 
@@ -243,7 +241,7 @@ electron.on("clear", (data) => {
 
   isTooltipActive.value = false;
   isLoading.value = false;
-  pricingPending.value = { market: false, exact: false, similar: false, quick: false };
+  pricingPending.value = { market: false, exact: false, similar: false };
   errorMessage.value = null;
 });
 
@@ -326,7 +324,7 @@ onMounted(() => {
     }
 
     isLoading.value = false;
-    pricingPending.value = { market: false, exact: false, similar: false, quick: false };
+    pricingPending.value = { market: false, exact: false, similar: false };
     isTooltipActive.value = false;
     applyKoreanMetadata(data);
     errorMessage.value = data.message || "알 수 없는 오류가 발생했습니다";
@@ -366,11 +364,10 @@ function applyKoreanMetadata(data) {
 }
 
 function resetItemStats() {
-  pricingPending.value = { market: true, exact: true, similar: true, quick: true };
+  pricingPending.value = { market: true, exact: true, similar: true };
   item.value.prices.market = null;
   item.value.prices.exactListing = null;
   item.value.prices.similarListing = null;
-  item.value.prices.quickSale = null;
   item.value.prices.density = null;
   item.value.prices.vendor = null;
   item.value.demand = null;
@@ -382,11 +379,10 @@ function resetItemStats() {
 }
 
 function applyPricing(pricing = {}) {
-  pricingPending.value = pricing.pending || { market: false, exact: false, similar: false, quick: false };
+  pricingPending.value = pricing.pending || { market: false, exact: false, similar: false };
   item.value.prices.market = pricing.market ?? null;
   item.value.prices.exactListing = pricing.exact_listing ?? null;
   item.value.prices.similarListing = pricing.similar_listing ?? null;
-  item.value.prices.quickSale = pricing.quick_sale ?? null;
   item.value.prices.density = pricing.density ?? null;
   item.value.prices.vendor = pricing.vendor ?? null;
 }
@@ -674,17 +670,6 @@ function getGradeColor(grade) {
                   <span v-else class="gold ml-2" style="color: var(--dnd-orange)">
                     {{ item.prices.similarListing }}
                   </span>
-                </div>
-                <div
-                  class="flex items-center justify-center"
-                  title="옵션을 제외하고, 같은 이름/등급 매물 중 최저가 기준입니다."
-                >
-                  <span>깡통최저가:</span>
-                  <span v-if="item.prices.quickSale !== null" class="gold ml-2" style="color: #ff77b7">
-                    {{ item.prices.quickSale }}
-                  </span>
-                  <span v-else-if="pricingPending.quick" class="ml-2">조회 중...</span>
-                  <span v-else class="ml-2">없음</span>
                 </div>
                 <div class="flex items-center justify-center" v-if="item.prices.density !== null">
                   <span>칸당 가치:</span>

@@ -15,13 +15,7 @@ let lastScanCache = { text: null, result: null, timestamp: 0 };
 const CACHE_TTL_MS = 10000;
 const MARKET_CACHE_TTL_MS = 60000;
 const MARKET_PAGE_LIMIT = 50;
-const QUICK_SALE_UNDERCUT = 10;
 const ATTRIBUTE_PRESENCE_RANGE = '>=-999999';
-const FALLBACK_PRICE_RANGE_GROUPS = [
-  [ '0:100', '100:250', '250:500', '500:1000' ],
-  [ '1000:2500', '2500:5000', '5000:10000', '10000:25000' ],
-  [ '25000:100000', '100000:1000000' ]
-];
 const marketCache = new Map ();
 
 export function wire (overlay) {
@@ -284,8 +278,7 @@ async function getItemStats (tooltipText) {
     data.pricing = data.pricing || {};
     data.pricing.exact_listing = null;
     data.pricing.similar_listing = null;
-    data.pricing.quick_sale = null;
-    data.pricing.pending = { market: true, exact: true, similar: true, quick: true };
+    data.pricing.pending = { market: true, exact: true, similar: true };
     const pricingPromises = applyListingPricing (data);
 
     return {
@@ -328,7 +321,7 @@ function applyListingPricing (data) {
   const attributes = item?.secondary || [];
 
   if (!item?.name || !item?.rarity) {
-    data.pricing.pending = { market: false, exact: false, similar: false, quick: false };
+    data.pricing.pending = { market: false, exact: false, similar: false };
     return [];
   }
 
@@ -365,13 +358,11 @@ function applyListingPricing (data) {
 
   let exactCandidate = null;
   let similarCandidate = null;
-  let quickCandidate = null;
   const updateListingPrices = () => {
     data.pricing.exact_listing = exactCandidate;
     data.pricing.similar_listing = similarCandidate !== exactCandidate
       ? similarCandidate
       : null;
-    data.pricing.quick_sale = quickCandidate === null ? null : quickCandidate - QUICK_SALE_UNDERCUT;
   };
 
   const marketPromise = getMarketListings (`sold:${recentSoldParams.toString ()}`, recentSoldParams)
@@ -398,23 +389,9 @@ function applyListingPricing (data) {
   if (validAttributes.length === 0) {
     data.pricing.pending.exact = false;
     data.pricing.pending.similar = false;
-    data.pricing.pending.quick = false;
 
     return [ marketPromise ];
   }
-
-  const quickPromise = getLowestBaseListingPrice (baseParams)
-    .then ((price) => {
-      quickCandidate = price;
-      updateListingPrices ();
-      logger.info (`Applied base listing quick sale pricing: ${data.pricing.quick_sale}`);
-    })
-    .catch ((error) => {
-      logger.warn (`Base listing quick sale pricing lookup failed: ${error.message || error}`);
-    })
-    .finally (() => {
-      data.pricing.pending.quick = false;
-    });
 
   const exactPromise = getLowestMarketPrice (exactParams)
     .then ((price) => {
@@ -442,7 +419,7 @@ function applyListingPricing (data) {
       data.pricing.pending.similar = false;
     });
 
-  return [ marketPromise, exactPromise, similarPromise, quickPromise ];
+  return [ marketPromise, exactPromise, similarPromise ];
 }
 
 async function getMarketListings (cacheKey, params) {
@@ -502,35 +479,6 @@ async function getLowestMarketPrice (params, predicate = () => true) {
   }
 }
 
-async function getLowestBaseListingPrice (params) {
-  for (const ranges of FALLBACK_PRICE_RANGE_GROUPS) {
-    const candidates = await Promise.all (
-      ranges.map (async (range) => {
-        const rangeParams = new URLSearchParams (params);
-        rangeParams.set ('price', range);
-        const listings = await getMarketListings (`fallback:${rangeParams.toString ()}`, rangeParams);
-        return { listings, params: rangeParams };
-      })
-    );
-
-    for (const candidate of candidates) {
-      if (candidate.listings.length === 0) {
-        continue;
-      }
-
-      const price = candidate.listings.length < MARKET_PAGE_LIMIT
-        ? minimum (activeMarketPrices (candidate.listings, hasUsableQuickSalePrice))
-        : await getLowestMarketPrice (candidate.params, hasUsableQuickSalePrice);
-
-      if (price !== null) {
-        return price;
-      }
-    }
-  }
-
-  return getLowestMarketPrice (params, hasUsableQuickSalePrice);
-}
-
 function isPresenceOnlySimilarAttribute (attribute) {
   return attribute.is_percentage === true || !Number.isInteger (Number (attribute.value));
 }
@@ -539,10 +487,6 @@ function marketPrices (list) {
   return (Array.isArray (list) ? list : [])
     .map ((listing) => Number (listing.price ?? listing.price_per_unit))
     .filter ((price) => Number.isFinite (price) && price > 0);
-}
-
-function hasUsableQuickSalePrice (listing) {
-  return Number (listing.price ?? listing.price_per_unit) > QUICK_SALE_UNDERCUT;
 }
 
 function activeMarketPrices (list, predicate = () => true) {
