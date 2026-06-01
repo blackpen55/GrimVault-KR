@@ -395,6 +395,14 @@ function applyListingPricing (data) {
       data.pricing.pending.market = false;
     });
 
+  if (validAttributes.length === 0) {
+    data.pricing.pending.exact = false;
+    data.pricing.pending.similar = false;
+    data.pricing.pending.quick = false;
+
+    return [ marketPromise ];
+  }
+
   const quickPromise = getLowestBaseListingPrice (baseParams)
     .then ((price) => {
       quickCandidate = price;
@@ -407,13 +415,6 @@ function applyListingPricing (data) {
     .finally (() => {
       data.pricing.pending.quick = false;
     });
-
-  if (validAttributes.length === 0) {
-    data.pricing.pending.exact = false;
-    data.pricing.pending.similar = false;
-
-    return [ marketPromise, quickPromise ];
-  }
 
   const exactPromise = getLowestMarketPrice (exactParams)
     .then ((price) => {
