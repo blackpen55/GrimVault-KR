@@ -675,8 +675,11 @@ function getGradeColor(grade) {
                     {{ item.prices.similarListing }}
                   </span>
                 </div>
-                <div class="flex items-center justify-center">
-                  <span>빠른판매가:</span>
+                <div
+                  class="flex items-center justify-center"
+                  title="옵션을 제외하고, 같은 이름/등급 매물 중 최저가 기준입니다."
+                >
+                  <span>깡통최저가:</span>
                   <span v-if="item.prices.quickSale !== null" class="gold ml-2" style="color: #ff77b7">
                     {{ item.prices.quickSale }}
                   </span>

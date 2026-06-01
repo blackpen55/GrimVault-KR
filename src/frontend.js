@@ -345,7 +345,6 @@ function applyListingPricing (data) {
   });
   const exactParams = new URLSearchParams (baseParams);
   const similarParams = new URLSearchParams (baseParams);
-  const quickParams = new URLSearchParams (baseParams);
 
   for (const attribute of validAttributes) {
     exactParams.append (`secondary[${attribute.name}]`, attribute.value);
@@ -353,7 +352,6 @@ function applyListingPricing (data) {
       `secondary[${attribute.name}]`,
       isPresenceOnlySimilarAttribute (attribute) ? ATTRIBUTE_PRESENCE_RANGE : attribute.value
     );
-    quickParams.append (`secondary[${attribute.name}]`, ATTRIBUTE_PRESENCE_RANGE);
   }
 
   const previousMarket = data.pricing.market;
@@ -367,15 +365,12 @@ function applyListingPricing (data) {
   let exactCandidate = null;
   let similarCandidate = null;
   let quickCandidate = null;
-  let quickLoaded = false;
   const updateListingPrices = () => {
     data.pricing.exact_listing = exactCandidate;
     data.pricing.similar_listing = similarCandidate !== exactCandidate
       ? similarCandidate
       : null;
-    const provisionalQuick = minimum ([ exactCandidate, similarCandidate ].filter ((price) => price !== null));
-    const quickLowest = quickLoaded ? quickCandidate : provisionalQuick;
-    data.pricing.quick_sale = quickLowest === null ? null : Math.max (0, quickLowest - 10);
+    data.pricing.quick_sale = quickCandidate === null ? null : Math.max (0, quickCandidate - 10);
   };
 
   const marketPromise = getMarketListings (`sold:${recentSoldParams.toString ()}`, recentSoldParams)
@@ -399,23 +394,22 @@ function applyListingPricing (data) {
       data.pricing.pending.market = false;
     });
 
+  const quickPromise = getLowestBaseListingPrice (baseParams)
+    .then ((price) => {
+      quickCandidate = price;
+      updateListingPrices ();
+      logger.info (`Applied base listing quick sale pricing: ${data.pricing.quick_sale}`);
+    })
+    .catch ((error) => {
+      logger.warn (`Base listing quick sale pricing lookup failed: ${error.message || error}`);
+    })
+    .finally (() => {
+      data.pricing.pending.quick = false;
+    });
+
   if (validAttributes.length === 0) {
     data.pricing.pending.exact = false;
     data.pricing.pending.similar = false;
-
-    const quickPromise = getLowestFallbackPrice (baseParams)
-      .then ((price) => {
-        quickCandidate = price;
-        quickLoaded = true;
-        updateListingPrices ();
-        logger.info (`Applied no-attribute quick sale pricing: ${data.pricing.quick_sale}`);
-      })
-      .catch ((error) => {
-        logger.warn (`No-attribute quick sale pricing lookup failed: ${error.message || error}`);
-      })
-      .finally (() => {
-        data.pricing.pending.quick = false;
-      });
 
     return [ marketPromise, quickPromise ];
   }
@@ -446,20 +440,6 @@ function applyListingPricing (data) {
       data.pricing.pending.similar = false;
     });
 
-  const quickPromise = getLowestMarketPrice (quickParams)
-    .then (async (price) => {
-      quickCandidate = price ?? await getLowestFallbackPrice (baseParams);
-      quickLoaded = true;
-      updateListingPrices ();
-      logger.info (`Applied quick sale pricing: ${data.pricing.quick_sale}`);
-    })
-    .catch ((error) => {
-      logger.warn (`Quick sale pricing lookup failed: ${error.message || error}`);
-    })
-    .finally (() => {
-      data.pricing.pending.quick = false;
-    });
-
   return [ marketPromise, exactPromise, similarPromise, quickPromise ];
 }
 
@@ -486,7 +466,7 @@ async function getMarketListings (cacheKey, params) {
   return promise;
 }
 
-async function getLowestMarketPrice (params, predicate = () => true) {
+async function getLowestMarketPrice (params) {
   let cursor = null;
   let lowest = null;
   const seenCursors = new Set ();
@@ -499,7 +479,7 @@ async function getLowestMarketPrice (params, predicate = () => true) {
     }
 
     const listings = await getMarketListings (`lowest:${pageParams.toString ()}`, pageParams);
-    lowest = minimum ([ lowest, ... activeMarketPrices (listings, predicate) ].filter ((price) => price !== null));
+    lowest = minimum ([ lowest, ... activeMarketPrices (listings) ].filter ((price) => price !== null));
 
     if (listings.length < MARKET_PAGE_LIMIT) {
       return lowest;
@@ -520,7 +500,7 @@ async function getLowestMarketPrice (params, predicate = () => true) {
   }
 }
 
-async function getLowestFallbackPrice (params) {
+async function getLowestBaseListingPrice (params) {
   for (const ranges of FALLBACK_PRICE_RANGE_GROUPS) {
     const candidates = await Promise.all (
       ranges.map (async (range) => {
@@ -537,8 +517,8 @@ async function getLowestFallbackPrice (params) {
       }
 
       const price = candidate.listings.length < MARKET_PAGE_LIMIT
-        ? minimum (activeMarketPrices (candidate.listings, hasNoSecondaryAttributes))
-        : await getLowestMarketPrice (candidate.params, hasNoSecondaryAttributes);
+        ? minimum (activeMarketPrices (candidate.listings))
+        : await getLowestMarketPrice (candidate.params);
 
       if (price !== null) {
         return price;
@@ -546,15 +526,11 @@ async function getLowestFallbackPrice (params) {
     }
   }
 
-  return getLowestMarketPrice (params, hasNoSecondaryAttributes);
+  return getLowestMarketPrice (params);
 }
 
 function isPresenceOnlySimilarAttribute (attribute) {
   return attribute.is_percentage === true || !Number.isInteger (Number (attribute.value));
-}
-
-function hasNoSecondaryAttributes (listing) {
-  return !Object.keys (listing).some ((key) => key.startsWith ('secondary_'));
 }
 
 function marketPrices (list) {
@@ -563,14 +539,13 @@ function marketPrices (list) {
     .filter ((price) => Number.isFinite (price) && price > 0);
 }
 
-function activeMarketPrices (list, predicate = () => true) {
+function activeMarketPrices (list) {
   return marketPrices ((Array.isArray (list) ? list : []).filter ((listing) => {
     const expiresAt = Date.parse (listing.expires_at);
 
     return listing.has_sold !== true
       && listing.has_expired !== true
-      && (!Number.isFinite (expiresAt) || expiresAt > Date.now ())
-      && predicate (listing);
+      && (!Number.isFinite (expiresAt) || expiresAt > Date.now ());
   }));
 }
 
