@@ -34,7 +34,7 @@ export async function checkForPortableUpdate (notify = () => {}) {
   return latest;
 }
 
-export async function installPortableUpdate (notify = () => {}) {
+export async function installPortableUpdate (notify = () => {}, latest = null) {
   if (isUpdating) {
     notify ('업데이트가 이미 진행 중입니다.');
     return;
@@ -43,13 +43,13 @@ export async function installPortableUpdate (notify = () => {}) {
   isUpdating = true;
 
   try {
-    const latest = await checkForPortableUpdate (notify);
-    if (!latest) return;
+    latest = latest || await checkForPortableUpdate (notify);
+    if (!latest) return false;
 
     if (!app.isPackaged) {
       notify (`개발 실행에서는 설치를 생략합니다. 최신 버전: ${latest.version}`);
       logger.info ('Portable updater skipped install in development mode', latest);
-      return;
+      return false;
     }
 
     notify (`${latest.version} 다운로드 중...`);
@@ -69,9 +69,11 @@ export async function installPortableUpdate (notify = () => {}) {
 
     notify ('업데이트 설치를 준비합니다...');
     launchInstallHelper (extractDir, latest.version);
+    return true;
   } catch (error) {
     logger.error ('Portable update failed:', error);
     notify (`업데이트 실패: ${error.message}`);
+    return false;
   } finally {
     isUpdating = false;
   }

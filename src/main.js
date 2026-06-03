@@ -1,5 +1,5 @@
 // import { app, BrowserWindow, ipcMain, screen } from 'electron';
-import electron, { globalShortcut, Menu, shell, Tray } from 'electron';
+import electron, { dialog, globalShortcut, Menu, shell, Tray } from 'electron';
 import { basename, join } from 'node:path';
 import { logger, logPath } from './logger.js';
 import { logSystemInformation } from './util.js';
@@ -140,8 +140,25 @@ app.on ('ready', async () => {
     {
       label: '업데이트 확인',
       type: 'normal',
-      click: () => {
-        installPortableUpdate (showToast);
+      click: async () => {
+        const latest = await checkForPortableUpdate (showToast);
+        if (!latest) return;
+
+        const result = await dialog.showMessageBox ({
+          type: 'question',
+          buttons: [ '예', '아니오' ],
+          defaultId: 0,
+          cancelId: 1,
+          title: 'GrimVault-KR 업데이트',
+          message: `새 버전 ${latest.version}을 설치할까요?`,
+          detail: `현재 버전: ${DISPLAY_VERSION}\n다운로드: ${latest.asset.name}\nGitHub 다운로드 수: ${latest.asset.download_count || 0}`
+        });
+
+        if (result.response === 0) {
+          installPortableUpdate (showToast, latest);
+        } else {
+          showToast ('업데이트를 취소했습니다.');
+        }
       }
     },
 
