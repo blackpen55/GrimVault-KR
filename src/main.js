@@ -151,7 +151,7 @@ app.on ('ready', async () => {
           cancelId: 1,
           title: 'GrimVault-KR 업데이트',
           message: `새 버전 ${latest.version}을 설치할까요?`,
-          detail: `현재 버전: ${DISPLAY_VERSION}\n다운로드: ${latest.asset.name}\nGitHub 다운로드 수: ${latest.asset.download_count || 0}`
+          detail: `현재 버전: ${DISPLAY_VERSION}\n다운로드: ${latest.asset.name}`
         });
 
         if (result.response === 0) {
