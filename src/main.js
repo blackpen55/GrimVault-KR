@@ -1,6 +1,5 @@
 // import { app, BrowserWindow, ipcMain, screen } from 'electron';
 import electron, { globalShortcut, Menu, shell, Tray } from 'electron';
-import updater from 'electron-updater';
 import { basename, join } from 'node:path';
 import { logger, logPath } from './logger.js';
 import { logSystemInformation } from './util.js';
@@ -14,9 +13,9 @@ import { startWindowHooks, stopWindowHooks } from './native.js';
 import { startService as startKoreanOcr, stopService as stopKoreanOcr } from './korean/index.js';
 import { DISPLAY_VERSION } from './version.js';
 import { showToast } from './toast.js';
+import { checkForPortableUpdate, installPortableUpdate } from './portableUpdater.js';
 
 const { app, BrowserWindow } = electron;
-const { autoUpdater } = updater;
 
 let debugging = false;
 
@@ -109,37 +108,8 @@ app.on ('ready', async () => {
   logSystemInformation ();
 
   if (settings.general.auto_updates) {
-    autoUpdater.setFeedURL ({
-      provider: 'github',
-      owner: 'blackpen55',
-      repo: 'GrimVault-KR'
-    });
-
-    autoUpdater.checkForUpdates ();
-
-    // Update event handlers
-    autoUpdater.on ('checking-for-update', () => {
-      logger.info ('Checking for updates');
-    });
-
-    autoUpdater.on ('update-available', (info) => {
-      logger.info ('Update available:', info);
-    });
-
-    autoUpdater.on ('update-not-available', (info) => {});
-
-    autoUpdater.on ('download-progress', (progressObj) => {
-      logger.info (`Download speed: ${progressObj.bytesPerSecond}`);
-      logger.info (`Downloaded ${progressObj.percent}%`);
-    });
-
-    autoUpdater.on ('update-downloaded', (info) => {
-      logger.info ('Installing update');
-      autoUpdater.quitAndInstall ();
-    });
-
-    autoUpdater.on ('error', (error) => {
-      logger.info (`Auto update error: ${error}`);
+    checkForPortableUpdate (showToast).catch ((error) => {
+      logger.error ('Portable update check failed:', error);
     });
   }
 
@@ -171,7 +141,7 @@ app.on ('ready', async () => {
       label: '업데이트 확인',
       type: 'normal',
       click: () => {
-        autoUpdater.checkForUpdates ();
+        installPortableUpdate (showToast);
       }
     },
 
@@ -242,7 +212,9 @@ app.on ('ready', async () => {
     logger.info ('Checking for updates every hour');
 
     setInterval (() => {
-      autoUpdater.checkForUpdates ();
+      checkForPortableUpdate (showToast).catch ((error) => {
+        logger.error ('Portable update check failed:', error);
+      });
     }, 60 * 60 * 1000);
   } else {
     logger.info ('Auto updates are disabled');
