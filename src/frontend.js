@@ -151,7 +151,7 @@ export function wire (overlay) {
           });
           overlay.setIgnoreMouseEvents (true, { forward: true });
           overlay.setAlwaysOnTop (true, 'screen-saver');
-          overlay.show ();
+          overlay.showInactive ();
           overlay.moveTop ();
 
           send ('game:bounds', {

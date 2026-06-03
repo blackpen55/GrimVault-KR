@@ -198,6 +198,7 @@ app.on ('ready', async () => {
     frame: false,
     transparent: true,
     alwaysOnTop: true,
+    focusable: false,
     skipTaskbar: true,
     type: 'toolbar',
     webPreferences: {

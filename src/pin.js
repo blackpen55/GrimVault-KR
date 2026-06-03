@@ -131,7 +131,7 @@ function updateOverlay (eventData) {
       overlayRef.setIgnoreMouseEvents (true, { forward: true });
       overlayRef.setAlwaysOnTop (true, 'screen-saver');
       overlayRef.setVisibleOnAllWorkspaces (true);
-      overlayRef.show ();
+      overlayRef.showInactive ();
       overlayRef.moveTop ();
 
       isShown = true;
@@ -233,7 +233,7 @@ export async function pin (overlay, debugging) {
             overlay.setIgnoreMouseEvents (true, { forward: true });
             overlay.setAlwaysOnTop (true, 'screen-saver');
             overlay.setVisibleOnAllWorkspaces (true);
-            overlay.show ();
+            overlay.showInactive ();
             overlay.moveTop ();
 
             isShown = true;
