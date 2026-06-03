@@ -175,6 +175,9 @@ app.on ('ready', async () => {
 
   tray.setToolTip ('GrimVault-KR');
   tray.setContextMenu (menu);
+  tray.on ('click', () => {
+    tray.popUpContextMenu (menu);
+  });
 
   logger.info ('Creating overlay window');
 
