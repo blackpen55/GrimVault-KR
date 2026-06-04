@@ -1,5 +1,5 @@
 // import { app, BrowserWindow, ipcMain, screen } from 'electron';
-import electron, { dialog, globalShortcut, Menu, shell, Tray } from 'electron';
+import electron, { globalShortcut, Menu, shell, Tray } from 'electron';
 import { basename, join } from 'node:path';
 import { logger, logPath } from './logger.js';
 import { logSystemInformation } from './util.js';
@@ -15,7 +15,7 @@ import { DISPLAY_VERSION } from './version.js';
 import { showToast } from './toast.js';
 import { checkForPortableUpdate, installPortableUpdate } from './portableUpdater.js';
 
-const { app, BrowserWindow } = electron;
+const { app, BrowserWindow, ipcMain, screen } = electron;
 
 let debugging = false;
 
@@ -104,6 +104,117 @@ app.on ('before-quit', () => {
   }
 });
 
+function showUpdateInstallPrompt (latest) {
+  return new Promise ((resolve) => {
+    const width = 390;
+    const height = 220;
+    const workArea = screen.getPrimaryDisplay ().workArea;
+    const x = Math.max (workArea.x, workArea.x + workArea.width - width - 24);
+    const y = Math.max (workArea.y, workArea.y + workArea.height - height - 72);
+    const responseChannel = `portable-update-response-${Date.now ()}-${Math.random ().toString (16).slice (2)}`;
+
+    let settled = false;
+    let prompt = new BrowserWindow ({
+      width,
+      height,
+      x,
+      y,
+      frame: false,
+      resizable: false,
+      alwaysOnTop: true,
+      skipTaskbar: true,
+      show: false,
+      backgroundColor: '#202124',
+      webPreferences: {
+        nodeIntegration: true,
+        contextIsolation: false,
+        sandbox: false
+      }
+    });
+
+    const finish = (value) => {
+      if (settled) return;
+
+      settled = true;
+      ipcMain.removeAllListeners (responseChannel);
+      if (prompt && !prompt.isDestroyed ()) prompt.close ();
+      prompt = null;
+      resolve (value);
+    };
+
+    ipcMain.once (responseChannel, (event, value) => {
+      finish (value === 'install');
+    });
+
+    prompt.on ('closed', () => {
+      finish (false);
+    });
+
+    prompt.setAlwaysOnTop (true, 'screen-saver');
+    prompt.loadURL (`data:text/html;charset=utf-8,${encodeURIComponent (getUpdatePromptHtml (latest, responseChannel))}`);
+    prompt.once ('ready-to-show', () => {
+      if (prompt && !prompt.isDestroyed ()) prompt.showInactive ();
+    });
+  });
+}
+
+function getUpdatePromptHtml (latest, responseChannel) {
+  return `
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          *{box-sizing:border-box}
+          body{margin:0;background:#202124;color:#f1f3f4;font:14px "Malgun Gothic",Segoe UI,sans-serif;user-select:none}
+          .wrap{height:100vh;border:1px solid #5f6368;box-shadow:0 18px 45px rgba(0,0,0,.45);padding:18px 18px 16px}
+          .title{font-weight:700;font-size:18px;margin-bottom:10px;color:#fff}
+          .version{font-size:16px;line-height:1.45;margin-bottom:12px}
+          .version b{color:#8ab4f8}
+          .meta{color:#bdc1c6;line-height:1.55;margin-bottom:16px}
+          .buttons{display:flex;gap:10px;justify-content:flex-end}
+          button{border:1px solid #5f6368;background:#2b2c2f;color:#f1f3f4;border-radius:8px;padding:10px 18px;font:14px "Malgun Gothic",Segoe UI,sans-serif;cursor:pointer}
+          button:hover{background:#3c4043}
+          .primary{background:#8ab4f8;border-color:#8ab4f8;color:#111}
+          .primary:hover{background:#a8c7fa}
+          .close{position:absolute;right:10px;top:8px;border:0;background:transparent;color:#bdc1c6;padding:4px 8px;font-size:18px}
+          .close:hover{background:#3c4043;color:#fff}
+        </style>
+      </head>
+      <body>
+        <div class="wrap">
+          <button class="close" onclick="send('cancel')" title="닫기">×</button>
+          <div class="title">GrimVault-KR 업데이트</div>
+          <div class="version">새 버전 <b>${escapeHtml (latest.version)}</b>을 설치할까요?</div>
+          <div class="meta">
+            현재 버전: ${escapeHtml (DISPLAY_VERSION)}<br>
+            다운로드: ${escapeHtml (latest.asset.name)}
+          </div>
+          <div class="buttons">
+            <button onclick="send('cancel')">아니오</button>
+            <button class="primary" onclick="send('install')">예, 설치</button>
+          </div>
+        </div>
+        <script>
+          const { ipcRenderer } = require('electron');
+          function send(value) {
+            ipcRenderer.send('${responseChannel}', value);
+          }
+        </script>
+      </body>
+    </html>
+  `;
+}
+
+function escapeHtml (value) {
+  return String (value)
+    .replace (/&/g, '&amp;')
+    .replace (/</g, '&lt;')
+    .replace (/>/g, '&gt;')
+    .replace (/"/g, '&quot;')
+    .replace (/'/g, '&#39;');
+}
+
 app.on ('ready', async () => {
   logSystemInformation ();
 
@@ -141,20 +252,19 @@ app.on ('ready', async () => {
       label: '업데이트 확인',
       type: 'normal',
       click: async () => {
-        const latest = await checkForPortableUpdate (showToast);
-        if (!latest) return;
-
-        const result = await dialog.showMessageBox ({
-          type: 'question',
-          buttons: [ '예', '아니오' ],
-          defaultId: 0,
-          cancelId: 1,
-          title: 'GrimVault-KR 업데이트',
-          message: `새 버전 ${latest.version}을 설치할까요?`,
-          detail: `현재 버전: ${DISPLAY_VERSION}\n다운로드: ${latest.asset.name}`
+        let updateMessage = null;
+        const latest = await checkForPortableUpdate ((message) => {
+          updateMessage = message;
         });
 
-        if (result.response === 0) {
+        if (!latest) {
+          if (updateMessage) showToast (updateMessage);
+          return;
+        }
+
+        const shouldInstall = await showUpdateInstallPrompt (latest);
+
+        if (shouldInstall) {
           installPortableUpdate (showToast, latest);
         } else {
           showToast ('업데이트를 취소했습니다.');
