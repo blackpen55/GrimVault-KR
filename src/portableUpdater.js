@@ -63,7 +63,16 @@ export async function installPortableUpdate (notify = () => {}, latest = null) {
 
     mkdirSync (extractDir, { recursive: true });
 
+    let lastProgressPercent = -1;
+    let lastProgressUpdate = 0;
+
     await downloadFile (latest.asset.browser_download_url, zipPath, (progress) => {
+      const now = Date.now ();
+      if (progress.percent === lastProgressPercent && now - lastProgressUpdate < 1000) return;
+
+      lastProgressPercent = progress.percent;
+      lastProgressUpdate = now;
+
       showUpdateProgress (
         `${latest.version} 다운로드 중...`,
         `${progress.percent}% (${formatBytes (progress.downloaded)} / ${formatBytes (progress.total)})`
@@ -213,6 +222,7 @@ function launchInstallHelper (sourceDir, version) {
   const logPath = join (app.getPath ('temp'), UPDATE_DIR_NAME, `install-${version}.log`);
 
   writeFileSync (helperPath, getInstallHelperScript (), 'utf8');
+  writeFileSync (logPath, `${new Date ().toISOString ()} Launching portable update helper\n`, 'utf8');
 
   const child = spawn (
     'powershell.exe',
@@ -220,7 +230,8 @@ function launchInstallHelper (sourceDir, version) {
       '-NoProfile',
       '-ExecutionPolicy',
       'Bypass',
-      '-File',
+      '-Command',
+      "& { param($helperPath, $pidToWait, $sourceDir, $targetDir, $exePath, $logPath) Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File', $helperPath, $pidToWait, $sourceDir, $targetDir, $exePath, $logPath) }",
       helperPath,
       String (process.pid),
       sourceDir,
@@ -235,9 +246,19 @@ function launchInstallHelper (sourceDir, version) {
     }
   );
 
+  child.on ('error', (error) => {
+    logger.error ('Portable update helper launch failed:', error);
+  });
+
   child.unref ();
-  logger.info (`Portable update helper launched for ${version}`);
+  logger.info (`Portable update helper launched for ${version}: ${logPath}`);
   app.quit ();
+
+  const forceExitTimer = setTimeout (() => {
+    logger.warn ('Forcing app exit for portable update');
+    app.exit (0);
+  }, 1500);
+  forceExitTimer.unref?.();
 }
 
 function showUpdateProgress (title, detail) {
