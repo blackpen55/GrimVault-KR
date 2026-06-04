@@ -51,6 +51,11 @@ export async function installPortableUpdate (notify = () => {}, latest = null) {
     latest = latest || await checkForPortableUpdate (notify);
     if (!latest) return false;
 
+    const refreshed = await getLatestPortableRelease ();
+    if (refreshed && refreshed.version === latest.version) {
+      latest = refreshed;
+    }
+
     if (!app.isPackaged) {
       notify (`개발 실행에서는 설치를 생략합니다. 최신 버전: ${latest.version}`);
       logger.info ('Portable updater skipped install in development mode', latest);
@@ -169,6 +174,7 @@ async function verifyDigest (filePath, digest) {
   const actual = await sha256 (filePath);
 
   if (actual !== expected) {
+    logger.warn (`Portable update digest mismatch. expected=${expected} actual=${actual}`);
     throw new Error ('다운로드 파일 검증 실패');
   }
 }

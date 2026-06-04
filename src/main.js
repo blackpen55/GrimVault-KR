@@ -19,6 +19,7 @@ const { app, BrowserWindow, ipcMain, screen } = electron;
 
 let debugging = false;
 let pendingPortableUpdate = null;
+let portableUpdateInstalling = false;
 
 const UPDATE_BADGE_CHECK_INTERVAL_MS = 12 * 60 * 60 * 1000;
 
@@ -256,6 +257,8 @@ function drawCircle (bitmap, width, height, centerX, centerY, radius, color) {
 }
 
 function setTrayUpdateState (tray, trayImages, latest) {
+  if (portableUpdateInstalling) return;
+
   pendingPortableUpdate = latest;
 
   if (latest) {
@@ -267,21 +270,33 @@ function setTrayUpdateState (tray, trayImages, latest) {
   }
 }
 
+function setTrayInstallingState (tray, trayImages, installing) {
+  portableUpdateInstalling = installing;
+
+  if (installing) {
+    tray.setImage (trayImages.normal);
+    tray.setToolTip ('GrimVault-KR - 업데이트 중...');
+  } else {
+    setTrayUpdateState (tray, trayImages, pendingPortableUpdate);
+  }
+
+  tray.setContextMenu (buildTrayMenu (tray, trayImages));
+}
+
 async function refreshTrayUpdateState (tray, trayImages) {
+  if (portableUpdateInstalling) return;
+
   try {
     const latest = await checkForPortableUpdate (() => {});
     setTrayUpdateState (tray, trayImages, latest);
+    tray.setContextMenu (buildTrayMenu (tray, trayImages));
   } catch (error) {
     logger.error ('Portable update badge check failed:', error);
   }
 }
 
-app.on ('ready', async () => {
-  logSystemInformation ();
-
-  logger.info ('Setting up system tray');
-
-  let menu = Menu.buildFromTemplate ([
+function buildTrayMenu (tray, trayImages) {
+  return Menu.buildFromTemplate ([
     {
       label: '버전',
       type: 'normal',
@@ -304,8 +319,9 @@ app.on ('ready', async () => {
     },
 
     {
-      label: '업데이트 확인',
+      label: portableUpdateInstalling ? '업데이트 진행 중...' : '업데이트 확인',
       type: 'normal',
+      enabled: !portableUpdateInstalling,
       click: async () => {
         let updateMessage = null;
         const latest = pendingPortableUpdate || await checkForPortableUpdate ((message) => {
@@ -321,8 +337,14 @@ app.on ('ready', async () => {
         const shouldInstall = await showUpdateInstallPrompt (latest);
 
         if (shouldInstall) {
-          setTrayUpdateState (tray, trayImages, null);
-          installPortableUpdate (showToast, latest);
+          pendingPortableUpdate = null;
+          setTrayInstallingState (tray, trayImages, true);
+          const installed = await installPortableUpdate (showToast, latest);
+
+          if (!installed) {
+            portableUpdateInstalling = false;
+            await refreshTrayUpdateState (tray, trayImages);
+          }
         } else {
           showToast ('업데이트를 취소했습니다.');
         }
@@ -337,9 +359,16 @@ app.on ('ready', async () => {
       }
     }
   ]);
+}
+
+app.on ('ready', async () => {
+  logSystemInformation ();
+
+  logger.info ('Setting up system tray');
   
   const trayImages = createTrayImages (join (ROOT, 'assets/images/Icon-81x89.png'));
   let tray = new Tray (trayImages.normal);
+  let menu = buildTrayMenu (tray, trayImages);
 
   tray.setToolTip ('GrimVault-KR');
   tray.setContextMenu (menu);
