@@ -57,11 +57,10 @@ export async function installPortableUpdate (notify = () => {}, latest = null) {
     showUpdateProgress (`${latest.version} 다운로드 중...`, '잠시만 기다려주세요.');
 
     const updateRoot = join (app.getPath ('temp'), UPDATE_DIR_NAME);
-    const versionRoot = join (updateRoot, latest.version);
+    const versionRoot = join (updateRoot, `${latest.version}-${Date.now ()}`);
     const extractDir = join (versionRoot, 'extracted');
     const zipPath = join (versionRoot, latest.asset.name);
 
-    rmSync (versionRoot, { recursive: true, force: true });
     mkdirSync (extractDir, { recursive: true });
 
     await downloadFile (latest.asset.browser_download_url, zipPath, (progress) => {
