@@ -480,6 +480,18 @@ try {
     Start-Sleep -Seconds 1
   }
 
+  $expectedOcrPath = Join-Path $TargetDir 'resources\korean\ocr-service\ocr-service.exe'
+  $runningOcr = Get-CimInstance Win32_Process -Filter "name = 'ocr-service.exe'" -ErrorAction SilentlyContinue |
+    Where-Object {
+      $_.ExecutablePath -and
+      [System.IO.Path]::GetFullPath($_.ExecutablePath).Equals([System.IO.Path]::GetFullPath($expectedOcrPath), [System.StringComparison]::OrdinalIgnoreCase)
+    }
+  if ($runningOcr) {
+    Write-UpdateLog "Forcing remaining OCR service processes to stop"
+    $runningOcr | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    Start-Sleep -Seconds 1
+  }
+
   if (-not (Test-Path -LiteralPath (Join-Path $SourceDir 'GrimVault-KR.exe'))) {
     throw "Extracted update is missing GrimVault-KR.exe"
   }

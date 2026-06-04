@@ -36,9 +36,7 @@ export function startService (pythonPath = 'python') {
     return;
   }
 
-  const koreanDir = app.isPackaged
-    ? join (RESOURCES, 'korean')
-    : join (ROOT, 'korean');
+  const koreanDir = getKoreanDir ();
 
   const modelsDir = app.isPackaged
     ? join (RESOURCES, 'models')
@@ -48,6 +46,8 @@ export function startService (pythonPath = 'python') {
   const mappingDir = join (koreanDir, 'mapping');
   const ocrExe = join (koreanDir, 'ocr-service', 'ocr-service.exe');
   const serverScript = join (koreanDir, 'ocr-service', 'server.py');
+
+  cleanupStalePackagedOcrServices (ocrExe);
 
   const env = { ...process.env };
   env.GRIMVAULT_TOOLTIP_MODEL = tooltipModelPath;
@@ -118,7 +118,10 @@ export function startService (pythonPath = 'python') {
 }
 
 export function stopService () {
-  if (!ocrProcess) return;
+  if (!ocrProcess) {
+    cleanupStalePackagedOcrServices ();
+    return;
+  }
 
   logger.info ('[Korean] Stopping OCR service');
 
@@ -136,6 +139,7 @@ export function stopService () {
   }
 
   ocrProcess = null;
+  cleanupStalePackagedOcrServices ();
   lastAvailabilityCheck = { available: false, timestamp: Date.now () };
 }
 
@@ -252,6 +256,58 @@ function resolveTooltipModelPath (modelsDir) {
   ];
 
   return candidates.find (candidate => existsSync (candidate)) || candidates [0];
+}
+
+function getKoreanDir () {
+  return app.isPackaged
+    ? join (RESOURCES, 'korean')
+    : join (ROOT, 'korean');
+}
+
+function cleanupStalePackagedOcrServices (ocrExe = null) {
+  if (process.platform !== 'win32' || !app.isPackaged) return;
+
+  const expectedExe = ocrExe || join (getKoreanDir (), 'ocr-service', 'ocr-service.exe');
+  if (!existsSync (expectedExe)) return;
+
+  try {
+    const result = spawnSync (
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-Command',
+        `& {
+          param($expectedExe, $currentPid)
+          $expected = [System.IO.Path]::GetFullPath($expectedExe)
+          Get-CimInstance Win32_Process -Filter "name = 'ocr-service.exe'" |
+            Where-Object {
+              $_.ProcessId -ne $currentPid -and
+              $_.ExecutablePath -and
+              [System.IO.Path]::GetFullPath($_.ExecutablePath).Equals($expected, [System.StringComparison]::OrdinalIgnoreCase)
+            } |
+            ForEach-Object {
+              Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+            }
+        }`,
+        expectedExe,
+        String (ocrProcess?.pid || 0)
+      ],
+      {
+        windowsHide: true,
+        stdio: 'pipe',
+        encoding: 'utf8',
+        timeout: 5000
+      }
+    );
+
+    if (result.status !== 0) {
+      logger.warn (`[Korean] Stale OCR cleanup failed: ${String (result.stderr || result.stdout || '').trim ()}`);
+    }
+  } catch (e) {
+    logger.warn (`[Korean] Stale OCR cleanup failed: ${e.message}`);
+  }
 }
 
 function describeServiceFailure (code, stderr) {
