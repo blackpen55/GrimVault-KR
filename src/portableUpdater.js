@@ -224,6 +224,7 @@ function launchInstallHelper (workDir, sourceDir, version) {
 
   writeFileSync (helperPath, getInstallHelperScript ({
     processId: process.pid,
+    updateRoot: join (app.getPath ('temp'), UPDATE_DIR_NAME),
     workDir,
     sourceDir,
     targetDir,
@@ -318,11 +319,12 @@ function escapeHtml (value) {
     .replace (/'/g, '&#39;');
 }
 
-function getInstallHelperScript ({ processId, workDir, sourceDir, targetDir, exePath, logPath }) {
+function getInstallHelperScript ({ processId, updateRoot, workDir, sourceDir, targetDir, exePath, logPath }) {
   return `
 $ErrorActionPreference = 'Stop'
 
 $ProcessIdToWait = ${Number (processId)}
+$UpdateRoot = ${toPowerShellString (updateRoot)}
 $WorkDir = ${toPowerShellString (workDir)}
 $SourceDir = ${toPowerShellString (sourceDir)}
 $TargetDir = ${toPowerShellString (targetDir)}
@@ -371,9 +373,19 @@ try {
   Start-Process -FilePath $ExePath -WorkingDirectory $TargetDir
   Write-UpdateLog "Update completed"
 
-  if (Test-Path -LiteralPath $WorkDir) {
+  $resolvedUpdateRoot = [System.IO.Path]::GetFullPath($UpdateRoot)
+  $resolvedWorkDir = [System.IO.Path]::GetFullPath($WorkDir)
+  $expectedPrefix = $resolvedUpdateRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+  $workParent = [System.IO.Directory]::GetParent($resolvedWorkDir)
+
+  if ($workParent -and
+      $workParent.FullName -eq $resolvedUpdateRoot -and
+      $resolvedWorkDir.StartsWith($expectedPrefix, [System.StringComparison]::OrdinalIgnoreCase) -and
+      (Test-Path -LiteralPath $resolvedWorkDir)) {
     Write-UpdateLog "Cleaning update temp folder $WorkDir"
-    Remove-Item -LiteralPath $WorkDir -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $resolvedWorkDir -Recurse -Force -ErrorAction SilentlyContinue
+  } else {
+    Write-UpdateLog "Skipped cleanup because work folder is outside update temp root: $WorkDir"
   }
 } catch {
   Write-UpdateLog "Update failed: $($_.Exception.Message)"
