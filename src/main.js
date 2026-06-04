@@ -23,6 +23,7 @@ let portableUpdateInstalling = false;
 let portableUpdateStatus = '업데이트 진행 중...';
 
 const UPDATE_BADGE_CHECK_INTERVAL_MS = 12 * 60 * 60 * 1000;
+const README_UPDATES_URL = 'https://github.com/blackpen55/GrimVault-KR#수정-사항';
 
 logger.info ('Loaded settings: ', settings);
 
@@ -398,6 +399,14 @@ function buildTrayMenu (tray, trayImages) {
         } else {
           showToast ('업데이트를 취소했습니다.');
         }
+      }
+    },
+
+    {
+      label: '업데이트 내용',
+      type: 'normal',
+      click: () => {
+        shell.openExternal (README_UPDATES_URL);
       }
     },
 
