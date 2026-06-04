@@ -20,6 +20,8 @@ let isUpdating = false;
 let progressWindow = null;
 let progressWindowHidden = false;
 let closingProgressWindow = false;
+let progressWindowLoaded = false;
+let pendingProgress = null;
 
 export async function checkForPortableUpdate (notify = () => {}) {
   const latest = await getLatestPortableRelease ();
@@ -278,7 +280,10 @@ function launchInstallHelper (workDir, sourceDir, version) {
 function showUpdateProgress (title, detail) {
   if (progressWindowHidden) return;
 
+  pendingProgress = { title, detail };
+
   if (!progressWindow || progressWindow.isDestroyed ()) {
+    progressWindowLoaded = false;
     progressWindow = new BrowserWindow ({
       width: 420,
       height: 150,
@@ -306,7 +311,26 @@ function showUpdateProgress (title, detail) {
         hideUpdateProgressWindow ();
       }
     });
+
+    ipcMain.removeAllListeners (HIDE_PROGRESS_CHANNEL);
+    ipcMain.on (HIDE_PROGRESS_CHANNEL, () => {
+      hideUpdateProgressWindow ();
+    });
+
+    progressWindow.loadURL (`data:text/html;charset=utf-8,${encodeURIComponent (getProgressWindowHtml ())}`);
+    progressWindow.webContents.once ('did-finish-load', () => {
+      progressWindowLoaded = true;
+      updateProgressWindowContent ();
+      if (!progressWindowHidden && progressWindow && !progressWindow.isDestroyed ()) {
+        progressWindow.showInactive ();
+      }
+    });
+  } else {
+    updateProgressWindowContent ();
   }
+
+  if (!progressWindowHidden && progressWindowLoaded) progressWindow.showInactive ();
+  return;
 
   const body = encodeURIComponent (`
     <meta charset="utf-8">
@@ -350,6 +374,47 @@ function hideUpdateProgressWindow () {
   }
 }
 
+function getProgressWindowHtml () {
+  return `
+    <meta charset="utf-8">
+    <style>
+      body{margin:0;padding:18px 20px;color:#fff;background:#202124;border:1px solid #5f6368;font:15px sans-serif}
+      b{display:block;margin-bottom:10px;font-size:16px}
+      p{margin:0 0 12px 0;line-height:1.45}
+      button{position:absolute;right:12px;top:10px;border:1px solid #5f6368;border-radius:6px;background:#2b2c2f;color:#f1f3f4;padding:5px 10px;font:12px sans-serif;cursor:pointer}
+      button:hover{background:#3c4043}
+      .bar{height:8px;background:#3c4043;border-radius:999px;overflow:hidden}
+      .fill{height:100%;width:100%;background:#8ab4f8;animation:pulse 1.2s ease-in-out infinite}
+      @keyframes pulse{0%{opacity:.45}50%{opacity:1}100%{opacity:.45}}
+    </style>
+    <button onclick="hideProgress()">숨기기</button>
+    <b id="title"></b>
+    <p id="detail"></p>
+    <div class="bar"><div class="fill"></div></div>
+    <script>
+      const { ipcRenderer } = require('electron');
+      function hideProgress() {
+        ipcRenderer.send('${HIDE_PROGRESS_CHANNEL}');
+      }
+      window.setProgressText = (title, detail) => {
+        document.getElementById('title').textContent = title;
+        document.getElementById('detail').textContent = detail;
+      };
+    </script>
+  `;
+}
+
+function updateProgressWindowContent () {
+  if (!pendingProgress || !progressWindowLoaded || !progressWindow || progressWindow.isDestroyed ()) return;
+
+  progressWindow.webContents.executeJavaScript (
+    `window.setProgressText(${JSON.stringify (pendingProgress.title)}, ${JSON.stringify (pendingProgress.detail)})`,
+    true
+  ).catch ((error) => {
+    logger.warn (`Portable update progress window update failed: ${error.message}`);
+  });
+}
+
 function closeUpdateProgress () {
   ipcMain.removeAllListeners (HIDE_PROGRESS_CHANNEL);
   if (progressWindow && !progressWindow.isDestroyed ()) {
@@ -357,6 +422,8 @@ function closeUpdateProgress () {
     progressWindow.close ();
   }
   progressWindow = null;
+  progressWindowLoaded = false;
+  pendingProgress = null;
   closingProgressWindow = false;
 }
 
