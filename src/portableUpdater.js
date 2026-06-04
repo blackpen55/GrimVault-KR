@@ -219,25 +219,25 @@ function verifyPortableTree (directory) {
 function launchInstallHelper (sourceDir, version) {
   const targetDir = dirname (process.execPath);
   const helperPath = join (app.getPath ('temp'), UPDATE_DIR_NAME, `install-${version}.ps1`);
+  const launcherPath = join (app.getPath ('temp'), UPDATE_DIR_NAME, `launch-${version}.cmd`);
   const logPath = join (app.getPath ('temp'), UPDATE_DIR_NAME, `install-${version}.log`);
 
-  writeFileSync (helperPath, getInstallHelperScript (), 'utf8');
+  writeFileSync (helperPath, getInstallHelperScript ({
+    processId: process.pid,
+    sourceDir,
+    targetDir,
+    exePath: process.execPath,
+    logPath
+  }), 'utf8');
+  writeFileSync (launcherPath, `@echo off\r\nstart "" /min powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${helperPath}"\r\n`, 'utf8');
   writeFileSync (logPath, `${new Date ().toISOString ()} Launching portable update helper\n`, 'utf8');
 
   const child = spawn (
-    'powershell.exe',
+    'cmd.exe',
     [
-      '-NoProfile',
-      '-ExecutionPolicy',
-      'Bypass',
-      '-Command',
-      "& { param($helperPath, $pidToWait, $sourceDir, $targetDir, $exePath, $logPath) Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File', $helperPath, $pidToWait, $sourceDir, $targetDir, $exePath, $logPath) }",
-      helperPath,
-      String (process.pid),
-      sourceDir,
-      targetDir,
-      process.execPath,
-      logPath
+      '/d',
+      '/c',
+      launcherPath
     ],
     {
       detached: true,
@@ -317,15 +317,15 @@ function escapeHtml (value) {
     .replace (/'/g, '&#39;');
 }
 
-function getInstallHelperScript () {
+function getInstallHelperScript ({ processId, sourceDir, targetDir, exePath, logPath }) {
   return `
 $ErrorActionPreference = 'Stop'
 
-$ProcessIdToWait = [int] $args[0]
-$SourceDir = $args[1]
-$TargetDir = $args[2]
-$ExePath = $args[3]
-$LogPath = $args[4]
+$ProcessIdToWait = ${Number (processId)}
+$SourceDir = ${toPowerShellString (sourceDir)}
+$TargetDir = ${toPowerShellString (targetDir)}
+$ExePath = ${toPowerShellString (exePath)}
+$LogPath = ${toPowerShellString (logPath)}
 
 function Write-UpdateLog($Message) {
   $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
@@ -336,6 +336,22 @@ try {
   Write-UpdateLog "Waiting for GrimVault-KR process $ProcessIdToWait"
   Wait-Process -Id $ProcessIdToWait -Timeout 60 -ErrorAction SilentlyContinue
   Start-Sleep -Seconds 1
+
+  $deadline = (Get-Date).AddSeconds(60)
+  do {
+    $running = Get-Process -Name 'GrimVault-KR' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $ExePath }
+    if (-not $running) {
+      break
+    }
+    Start-Sleep -Seconds 1
+  } while ((Get-Date) -lt $deadline)
+
+  $running = Get-Process -Name 'GrimVault-KR' -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $ExePath }
+  if ($running) {
+    Write-UpdateLog "Forcing remaining GrimVault-KR processes to stop"
+    $running | Stop-Process -Force
+    Start-Sleep -Seconds 1
+  }
 
   if (-not (Test-Path -LiteralPath (Join-Path $SourceDir 'GrimVault-KR.exe'))) {
     throw "Extracted update is missing GrimVault-KR.exe"
@@ -356,6 +372,10 @@ try {
   Write-UpdateLog "Update failed: $($_.Exception.Message)"
 }
 `;
+}
+
+function toPowerShellString (value) {
+  return `'${String (value).replace (/'/g, "''")}'`;
 }
 
 function compareVersions (left, right) {
