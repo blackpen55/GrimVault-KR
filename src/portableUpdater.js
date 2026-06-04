@@ -9,11 +9,12 @@ import { promisify } from 'node:util';
 import { logger } from './logger.js';
 import { DISPLAY_VERSION } from './version.js';
 
-const { app, BrowserWindow } = electron;
+const { app, BrowserWindow, ipcMain } = electron;
 const execFileAsync = promisify (execFile);
 
 const RELEASES_API = 'https://api.github.com/repos/blackpen55/GrimVault-KR/releases/latest';
 const UPDATE_DIR_NAME = 'grimvault-kr-update';
+const HIDE_PROGRESS_CHANNEL = 'portable-update-hide-progress';
 
 let isUpdating = false;
 let progressWindow = null;
@@ -279,21 +280,24 @@ function showUpdateProgress (title, detail) {
       resizable: false,
       alwaysOnTop: true,
       skipTaskbar: true,
-      show: false
+      show: false,
+      webPreferences: {
+        nodeIntegration: true,
+        contextIsolation: false,
+        sandbox: false
+      }
     });
     progressWindow.setAlwaysOnTop (true, 'screen-saver');
     progressWindow.on ('close', (event) => {
       if (!closingProgressWindow && !progressWindowHidden) {
         event.preventDefault ();
-        progressWindowHidden = true;
-        progressWindow?.hide ();
+        hideUpdateProgressWindow ();
       }
     });
     progressWindow.on ('closed', () => { progressWindow = null; });
     progressWindow.webContents.on ('before-input-event', (event, input) => {
       if (input.key === 'Escape') {
-        progressWindowHidden = true;
-        progressWindow?.hide ();
+        hideUpdateProgressWindow ();
       }
     });
   }
@@ -310,17 +314,38 @@ function showUpdateProgress (title, detail) {
       .fill{height:100%;width:100%;background:#8ab4f8;animation:pulse 1.2s ease-in-out infinite}
       @keyframes pulse{0%{opacity:.45}50%{opacity:1}100%{opacity:.45}}
     </style>
-    <button onclick="window.close()">숨기기</button>
+    <button onclick="hideProgress()">숨기기</button>
     <b>${escapeHtml (title)}</b>
     <p>${escapeHtml (detail)}</p>
     <div class="bar"><div class="fill"></div></div>
+    <script>
+      const { ipcRenderer } = require('electron');
+      function hideProgress() {
+        ipcRenderer.send('${HIDE_PROGRESS_CHANNEL}');
+      }
+    </script>
   `);
 
+  ipcMain.removeAllListeners (HIDE_PROGRESS_CHANNEL);
+  ipcMain.once (HIDE_PROGRESS_CHANNEL, () => {
+    hideUpdateProgressWindow ();
+  });
+
+  if (progressWindowHidden) return;
   progressWindow.loadURL (`data:text/html;charset=utf-8,${body}`);
+  if (progressWindowHidden) return;
   progressWindow.showInactive ();
 }
 
+function hideUpdateProgressWindow () {
+  progressWindowHidden = true;
+  if (progressWindow && !progressWindow.isDestroyed ()) {
+    progressWindow.hide ();
+  }
+}
+
 function closeUpdateProgress () {
+  ipcMain.removeAllListeners (HIDE_PROGRESS_CHANNEL);
   if (progressWindow && !progressWindow.isDestroyed ()) {
     closingProgressWindow = true;
     progressWindow.close ();
