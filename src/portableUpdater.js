@@ -87,7 +87,7 @@ export async function installPortableUpdate (notify = () => {}, latest = null) {
 
     notify ('업데이트 설치를 준비합니다...');
     showUpdateProgress ('업데이트 설치 준비 완료', '앱을 재시작하고 새 버전으로 교체합니다.');
-    launchInstallHelper (extractDir, latest.version);
+    launchInstallHelper (versionRoot, extractDir, latest.version);
     return true;
   } catch (error) {
     logger.error ('Portable update failed:', error);
@@ -216,7 +216,7 @@ function verifyPortableTree (directory) {
   }
 }
 
-function launchInstallHelper (sourceDir, version) {
+function launchInstallHelper (workDir, sourceDir, version) {
   const targetDir = dirname (process.execPath);
   const helperPath = join (app.getPath ('temp'), UPDATE_DIR_NAME, `install-${version}.ps1`);
   const launcherPath = join (app.getPath ('temp'), UPDATE_DIR_NAME, `launch-${version}.cmd`);
@@ -224,6 +224,7 @@ function launchInstallHelper (sourceDir, version) {
 
   writeFileSync (helperPath, getInstallHelperScript ({
     processId: process.pid,
+    workDir,
     sourceDir,
     targetDir,
     exePath: process.execPath,
@@ -317,11 +318,12 @@ function escapeHtml (value) {
     .replace (/'/g, '&#39;');
 }
 
-function getInstallHelperScript ({ processId, sourceDir, targetDir, exePath, logPath }) {
+function getInstallHelperScript ({ processId, workDir, sourceDir, targetDir, exePath, logPath }) {
   return `
 $ErrorActionPreference = 'Stop'
 
 $ProcessIdToWait = ${Number (processId)}
+$WorkDir = ${toPowerShellString (workDir)}
 $SourceDir = ${toPowerShellString (sourceDir)}
 $TargetDir = ${toPowerShellString (targetDir)}
 $ExePath = ${toPowerShellString (exePath)}
@@ -368,6 +370,11 @@ try {
   Write-UpdateLog "Restarting $ExePath"
   Start-Process -FilePath $ExePath -WorkingDirectory $TargetDir
   Write-UpdateLog "Update completed"
+
+  if (Test-Path -LiteralPath $WorkDir) {
+    Write-UpdateLog "Cleaning update temp folder $WorkDir"
+    Remove-Item -LiteralPath $WorkDir -Recurse -Force -ErrorAction SilentlyContinue
+  }
 } catch {
   Write-UpdateLog "Update failed: $($_.Exception.Message)"
 }
