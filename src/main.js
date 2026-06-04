@@ -1,5 +1,5 @@
 // import { app, BrowserWindow, ipcMain, screen } from 'electron';
-import electron, { globalShortcut, Menu, shell, Tray } from 'electron';
+import electron, { globalShortcut, Menu, nativeImage, shell, Tray } from 'electron';
 import { basename, join } from 'node:path';
 import { logger, logPath } from './logger.js';
 import { logSystemInformation } from './util.js';
@@ -18,6 +18,9 @@ import { checkForPortableUpdate, installPortableUpdate } from './portableUpdater
 const { app, BrowserWindow, ipcMain, screen } = electron;
 
 let debugging = false;
+let pendingPortableUpdate = null;
+
+const UPDATE_BADGE_CHECK_INTERVAL_MS = 12 * 60 * 60 * 1000;
 
 logger.info ('Loaded settings: ', settings);
 
@@ -215,14 +218,66 @@ function escapeHtml (value) {
     .replace (/'/g, '&#39;');
 }
 
+function createTrayImages (iconPath) {
+  const normal = nativeImage.createFromPath (iconPath);
+  const update = createUpdateBadgeImage (normal);
+
+  return { normal, update };
+}
+
+function createUpdateBadgeImage (sourceImage) {
+  const size = 16;
+  const image = sourceImage.resize ({ width: size, height: size });
+  const bitmap = Buffer.from (image.toBitmap ());
+
+  drawCircle (bitmap, size, size, size - 5, 5, 5, { r: 255, g: 255, b: 255, a: 255 });
+  drawCircle (bitmap, size, size, size - 5, 5, 4, { r: 230, g: 24, b: 24, a: 255 });
+
+  return nativeImage.createFromBitmap (bitmap, { width: size, height: size });
+}
+
+function drawCircle (bitmap, width, height, centerX, centerY, radius, color) {
+  const radiusSquared = radius * radius;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const distanceX = x - centerX;
+      const distanceY = y - centerY;
+
+      if (distanceX * distanceX + distanceY * distanceY > radiusSquared) continue;
+
+      const index = (y * width + x) * 4;
+      bitmap [index] = color.b;
+      bitmap [index + 1] = color.g;
+      bitmap [index + 2] = color.r;
+      bitmap [index + 3] = color.a;
+    }
+  }
+}
+
+function setTrayUpdateState (tray, trayImages, latest) {
+  pendingPortableUpdate = latest;
+
+  if (latest) {
+    tray.setImage (trayImages.update);
+    tray.setToolTip (`GrimVault-KR - 새 버전 ${latest.version} 사용 가능`);
+  } else {
+    tray.setImage (trayImages.normal);
+    tray.setToolTip ('GrimVault-KR');
+  }
+}
+
+async function refreshTrayUpdateState (tray, trayImages) {
+  try {
+    const latest = await checkForPortableUpdate (() => {});
+    setTrayUpdateState (tray, trayImages, latest);
+  } catch (error) {
+    logger.error ('Portable update badge check failed:', error);
+  }
+}
+
 app.on ('ready', async () => {
   logSystemInformation ();
-
-  if (settings.general.auto_updates) {
-    checkForPortableUpdate (showToast).catch ((error) => {
-      logger.error ('Portable update check failed:', error);
-    });
-  }
 
   logger.info ('Setting up system tray');
 
@@ -253,18 +308,20 @@ app.on ('ready', async () => {
       type: 'normal',
       click: async () => {
         let updateMessage = null;
-        const latest = await checkForPortableUpdate ((message) => {
-          updateMessage = message;
-        });
+        const latest = pendingPortableUpdate || await checkForPortableUpdate ((message) => {
+            updateMessage = message;
+          });
 
         if (!latest) {
           if (updateMessage) showToast (updateMessage);
           return;
         }
 
+        setTrayUpdateState (tray, trayImages, latest);
         const shouldInstall = await showUpdateInstallPrompt (latest);
 
         if (shouldInstall) {
+          setTrayUpdateState (tray, trayImages, null);
           installPortableUpdate (showToast, latest);
         } else {
           showToast ('업데이트를 취소했습니다.');
@@ -281,13 +338,19 @@ app.on ('ready', async () => {
     }
   ]);
   
-  let tray = new Tray (join (ROOT, 'assets/images/Icon-81x89.png'));
+  const trayImages = createTrayImages (join (ROOT, 'assets/images/Icon-81x89.png'));
+  let tray = new Tray (trayImages.normal);
 
   tray.setToolTip ('GrimVault-KR');
   tray.setContextMenu (menu);
   tray.on ('click', () => {
     tray.popUpContextMenu (menu);
   });
+
+  refreshTrayUpdateState (tray, trayImages);
+  setInterval (() => {
+    refreshTrayUpdateState (tray, trayImages);
+  }, UPDATE_BADGE_CHECK_INTERVAL_MS);
 
   logger.info ('Creating overlay window');
 
@@ -338,17 +401,7 @@ app.on ('ready', async () => {
 
   wire (overlay);
 
-  if (settings.general.auto_updates) {
-    logger.info ('Checking for updates every hour');
-
-    setInterval (() => {
-      checkForPortableUpdate (showToast).catch ((error) => {
-        logger.error ('Portable update check failed:', error);
-      });
-    }, 60 * 60 * 1000);
-  } else {
-    logger.info ('Auto updates are disabled');
-  }
+  logger.info ('Checking for portable update badges every 12 hours');
 
   const vcredistInstalled = await checkAndInstallVCRedist (overlay);
   
