@@ -20,6 +20,7 @@ const { app, BrowserWindow, ipcMain, screen } = electron;
 let debugging = false;
 let pendingPortableUpdate = null;
 let portableUpdateInstalling = false;
+let portableUpdateStatus = '업데이트 진행 중...';
 
 const UPDATE_BADGE_CHECK_INTERVAL_MS = 12 * 60 * 60 * 1000;
 
@@ -270,16 +271,27 @@ function setTrayUpdateState (tray, trayImages, latest) {
   }
 }
 
-function setTrayInstallingState (tray, trayImages, installing) {
+function setTrayInstallingState (tray, trayImages, installing, status = '업데이트 진행 중...') {
   portableUpdateInstalling = installing;
+  portableUpdateStatus = status;
 
   if (installing) {
     tray.setImage (trayImages.normal);
-    tray.setToolTip ('GrimVault-KR - 업데이트 중...');
+    tray.setToolTip (`GrimVault-KR - ${portableUpdateStatus}`);
   } else {
+    portableUpdateStatus = '업데이트 진행 중...';
     setTrayUpdateState (tray, trayImages, pendingPortableUpdate);
   }
 
+  tray.setContextMenu (buildTrayMenu (tray, trayImages));
+}
+
+function updateTrayInstallingStatus (tray, trayImages, status) {
+  if (!portableUpdateInstalling) return;
+
+  portableUpdateStatus = status;
+  tray.setImage (trayImages.normal);
+  tray.setToolTip (`GrimVault-KR - ${portableUpdateStatus}`);
   tray.setContextMenu (buildTrayMenu (tray, trayImages));
 }
 
@@ -319,7 +331,7 @@ function buildTrayMenu (tray, trayImages) {
     },
 
     {
-      label: portableUpdateInstalling ? '업데이트 진행 중...' : '업데이트 확인',
+      label: portableUpdateInstalling ? portableUpdateStatus : '업데이트 확인',
       type: 'normal',
       enabled: !portableUpdateInstalling,
       click: async () => {
@@ -338,8 +350,10 @@ function buildTrayMenu (tray, trayImages) {
 
         if (shouldInstall) {
           pendingPortableUpdate = null;
-          setTrayInstallingState (tray, trayImages, true);
-          const installed = await installPortableUpdate (showToast, latest);
+          setTrayInstallingState (tray, trayImages, true, `다운로드 준비 중... (${latest.version})`);
+          const installed = await installPortableUpdate (showToast, latest, (status) => {
+            updateTrayInstallingStatus (tray, trayImages, status);
+          });
 
           if (!installed) {
             portableUpdateInstalling = false;

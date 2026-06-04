@@ -40,7 +40,7 @@ export async function checkForPortableUpdate (notify = () => {}) {
   return latest;
 }
 
-export async function installPortableUpdate (notify = () => {}, latest = null) {
+export async function installPortableUpdate (notify = () => {}, latest = null, onStatus = () => {}) {
   if (isUpdating) {
     notify ('업데이트가 이미 진행 중입니다.');
     return;
@@ -65,6 +65,7 @@ export async function installPortableUpdate (notify = () => {}, latest = null) {
     }
 
     notify (`${latest.version} 다운로드 중...`);
+    onStatus (`다운로드 준비 중... (${latest.version})`);
     showUpdateProgress (`${latest.version} 다운로드 중...`, '잠시만 기다려주세요.');
 
     const updateRoot = join (app.getPath ('temp'), UPDATE_DIR_NAME);
@@ -88,15 +89,20 @@ export async function installPortableUpdate (notify = () => {}, latest = null) {
         `${latest.version} 다운로드 중...`,
         `${progress.percent}% (${formatBytes (progress.downloaded)} / ${formatBytes (progress.total)})`
       );
+      onStatus (`다운로드 중 ${progress.percent}%`);
     });
+    onStatus ('업데이트 파일 검증 중...');
     showUpdateProgress ('업데이트 파일 검증 중...', '다운로드한 파일을 확인하고 있습니다.');
     await verifyDigest (zipPath, latest.asset.digest);
+    onStatus ('압축 해제 중...');
     showUpdateProgress ('압축 해제 중...', '업데이트 파일을 준비하고 있습니다.');
     await extractZip (zipPath, extractDir);
+    onStatus ('업데이트 파일 확인 중...');
     showUpdateProgress ('업데이트 파일 확인 중...', '필수 파일이 모두 있는지 확인하고 있습니다.');
     verifyPortableTree (extractDir);
 
     notify ('업데이트 설치를 준비합니다...');
+    onStatus ('설치 준비 완료. 앱 재시작 중...');
     showUpdateProgress ('업데이트 설치 준비 완료', '앱을 재시작하고 새 버전으로 교체합니다.');
     launchInstallHelper (versionRoot, extractDir, latest.version);
     return true;
