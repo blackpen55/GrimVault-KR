@@ -230,8 +230,8 @@ function createUpdateBadgeImage (sourceImage) {
   const image = sourceImage.resize ({ width: size, height: size });
   const bitmap = Buffer.from (image.toBitmap ());
 
-  drawCircle (bitmap, size, size, size - 5, 5, 5, { r: 255, g: 255, b: 255, a: 255 });
-  drawCircle (bitmap, size, size, size - 5, 5, 4, { r: 230, g: 24, b: 24, a: 255 });
+  drawCircle (bitmap, size, size, size - 4, 4, 3, { r: 255, g: 255, b: 255, a: 255 });
+  drawCircle (bitmap, size, size, size - 4, 4, 2, { r: 230, g: 24, b: 24, a: 255 });
 
   return nativeImage.createFromBitmap (bitmap, { width: size, height: size });
 }
