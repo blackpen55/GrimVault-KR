@@ -13,7 +13,7 @@ import { startWindowHooks, stopWindowHooks } from './native.js';
 import { startService as startKoreanOcr, stopService as stopKoreanOcr } from './korean/index.js';
 import { DISPLAY_VERSION } from './version.js';
 import { showToast } from './toast.js';
-import { checkForPortableUpdate, installPortableUpdate } from './portableUpdater.js';
+import { checkForPortableUpdate, installPortableUpdate, showPortableUpdateProgressWindow } from './portableUpdater.js';
 
 const { app, BrowserWindow, ipcMain, screen } = electron;
 
@@ -223,8 +223,9 @@ function escapeHtml (value) {
 function createTrayImages (iconPath) {
   const normal = nativeImage.createFromPath (iconPath);
   const update = createUpdateBadgeImage (normal);
+  const installing = createInstallingBadgeImage (normal);
 
-  return { normal, update };
+  return { normal, update, installing };
 }
 
 function createUpdateBadgeImage (sourceImage) {
@@ -271,12 +272,41 @@ function setTrayUpdateState (tray, trayImages, latest) {
   }
 }
 
+function createInstallingBadgeImage (sourceImage) {
+  const size = 16;
+  const image = sourceImage.resize ({ width: size, height: size });
+  const bitmap = Buffer.from (image.toBitmap ());
+  const color = { r: 138, g: 180, b: 248, a: 255 };
+  const outline = { r: 32, g: 33, b: 36, a: 255 };
+  const startX = size - 7;
+  const startY = 3;
+
+  drawLine (bitmap, size, size, startX, startY, startX, startY + 7, outline, 3);
+  drawLine (bitmap, size, size, startX - 3, startY + 4, startX, startY + 7, outline, 3);
+  drawLine (bitmap, size, size, startX + 3, startY + 4, startX, startY + 7, outline, 3);
+  drawLine (bitmap, size, size, startX, startY, startX, startY + 7, color, 1);
+  drawLine (bitmap, size, size, startX - 3, startY + 4, startX, startY + 7, color, 1);
+  drawLine (bitmap, size, size, startX + 3, startY + 4, startX, startY + 7, color, 1);
+
+  return nativeImage.createFromBitmap (bitmap, { width: size, height: size });
+}
+
+function drawLine (bitmap, width, height, x1, y1, x2, y2, color, thickness = 1) {
+  const steps = Math.max (Math.abs (x2 - x1), Math.abs (y2 - y1));
+
+  for (let step = 0; step <= steps; step++) {
+    const x = Math.round (x1 + ((x2 - x1) * step / Math.max (steps, 1)));
+    const y = Math.round (y1 + ((y2 - y1) * step / Math.max (steps, 1)));
+    drawCircle (bitmap, width, height, x, y, thickness, color);
+  }
+}
+
 function setTrayInstallingState (tray, trayImages, installing, status = '업데이트 진행 중...') {
   portableUpdateInstalling = installing;
   portableUpdateStatus = status;
 
   if (installing) {
-    tray.setImage (trayImages.normal);
+    tray.setImage (trayImages.installing);
     tray.setToolTip (`GrimVault-KR - ${portableUpdateStatus}`);
   } else {
     portableUpdateStatus = '업데이트 진행 중...';
@@ -290,7 +320,7 @@ function updateTrayInstallingStatus (tray, trayImages, status) {
   if (!portableUpdateInstalling) return;
 
   portableUpdateStatus = status;
-  tray.setImage (trayImages.normal);
+  tray.setImage (trayImages.installing);
   tray.setToolTip (`GrimVault-KR - ${portableUpdateStatus}`);
   tray.setContextMenu (buildTrayMenu (tray, trayImages));
 }
@@ -331,10 +361,16 @@ function buildTrayMenu (tray, trayImages) {
     },
 
     {
-      label: portableUpdateInstalling ? portableUpdateStatus : '업데이트 확인',
+      label: portableUpdateInstalling ? `${portableUpdateStatus} (창 다시 열기)` : '업데이트 확인',
       type: 'normal',
-      enabled: !portableUpdateInstalling,
       click: async () => {
+        if (portableUpdateInstalling) {
+          if (!showPortableUpdateProgressWindow ()) {
+            showToast ('업데이트가 진행 중입니다.');
+          }
+          return;
+        }
+
         let updateMessage = null;
         const latest = pendingPortableUpdate || await checkForPortableUpdate ((message) => {
             updateMessage = message;

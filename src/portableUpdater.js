@@ -116,6 +116,24 @@ export async function installPortableUpdate (notify = () => {}, latest = null, o
   }
 }
 
+export function showPortableUpdateProgressWindow () {
+  progressWindowHidden = false;
+
+  if (progressWindow && !progressWindow.isDestroyed ()) {
+    updateProgressWindowContent ();
+    progressWindow.showInactive ();
+    progressWindow.focus ();
+    return true;
+  }
+
+  if (pendingProgress) {
+    showUpdateProgress (pendingProgress.title, pendingProgress.detail);
+    return true;
+  }
+
+  return false;
+}
+
 async function getLatestPortableRelease () {
   const response = await fetch (RELEASES_API, {
     headers: {
