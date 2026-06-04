@@ -17,6 +17,8 @@ const UPDATE_DIR_NAME = 'grimvault-kr-update';
 
 let isUpdating = false;
 let progressWindow = null;
+let progressWindowHidden = false;
+let closingProgressWindow = false;
 
 export async function checkForPortableUpdate (notify = () => {}) {
   const latest = await getLatestPortableRelease ();
@@ -42,6 +44,7 @@ export async function installPortableUpdate (notify = () => {}, latest = null) {
   }
 
   isUpdating = true;
+  progressWindowHidden = false;
 
   try {
     latest = latest || await checkForPortableUpdate (notify);
@@ -217,6 +220,8 @@ function verifyPortableTree (directory) {
 }
 
 function launchInstallHelper (workDir, sourceDir, version) {
+  closeUpdateProgress ();
+
   const targetDir = dirname (process.execPath);
   const helperPath = join (app.getPath ('temp'), UPDATE_DIR_NAME, `install-${version}.ps1`);
   const launcherPath = join (app.getPath ('temp'), UPDATE_DIR_NAME, `launch-${version}.cmd`);
@@ -264,6 +269,8 @@ function launchInstallHelper (workDir, sourceDir, version) {
 }
 
 function showUpdateProgress (title, detail) {
+  if (progressWindowHidden) return;
+
   if (!progressWindow || progressWindow.isDestroyed ()) {
     progressWindow = new BrowserWindow ({
       width: 420,
@@ -275,7 +282,20 @@ function showUpdateProgress (title, detail) {
       show: false
     });
     progressWindow.setAlwaysOnTop (true, 'screen-saver');
+    progressWindow.on ('close', (event) => {
+      if (!closingProgressWindow && !progressWindowHidden) {
+        event.preventDefault ();
+        progressWindowHidden = true;
+        progressWindow?.hide ();
+      }
+    });
     progressWindow.on ('closed', () => { progressWindow = null; });
+    progressWindow.webContents.on ('before-input-event', (event, input) => {
+      if (input.key === 'Escape') {
+        progressWindowHidden = true;
+        progressWindow?.hide ();
+      }
+    });
   }
 
   const body = encodeURIComponent (`
@@ -284,10 +304,13 @@ function showUpdateProgress (title, detail) {
       body{margin:0;padding:18px 20px;color:#fff;background:#202124;border:1px solid #5f6368;font:15px sans-serif}
       b{display:block;margin-bottom:10px;font-size:16px}
       p{margin:0 0 12px 0;line-height:1.45}
+      button{position:absolute;right:12px;top:10px;border:1px solid #5f6368;border-radius:6px;background:#2b2c2f;color:#f1f3f4;padding:5px 10px;font:12px sans-serif;cursor:pointer}
+      button:hover{background:#3c4043}
       .bar{height:8px;background:#3c4043;border-radius:999px;overflow:hidden}
       .fill{height:100%;width:100%;background:#8ab4f8;animation:pulse 1.2s ease-in-out infinite}
       @keyframes pulse{0%{opacity:.45}50%{opacity:1}100%{opacity:.45}}
     </style>
+    <button onclick="window.close()">숨기기</button>
     <b>${escapeHtml (title)}</b>
     <p>${escapeHtml (detail)}</p>
     <div class="bar"><div class="fill"></div></div>
@@ -299,9 +322,11 @@ function showUpdateProgress (title, detail) {
 
 function closeUpdateProgress () {
   if (progressWindow && !progressWindow.isDestroyed ()) {
+    closingProgressWindow = true;
     progressWindow.close ();
   }
   progressWindow = null;
+  closingProgressWindow = false;
 }
 
 function formatBytes (bytes) {
